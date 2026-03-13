@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Codiey — Listening</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['Inter', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
+      },
+      colors: {
+        brand: {
+          dark: '#1a1a1a',
+          panel: '#141414',
+          active: '#1f1f1f',
+          border: '#2a2a2a',
+          teal: '#4dd1c4',
+          'teal-dim': '#0d3d38',
+        },
+        code: {
+          green: '#3fb950',
+          red: '#f85149',
+        }
+      }
+    }
+  }
+}
+</script>
+<style>
+  @keyframes glowPulseFaint {
+    0%, 100% { box-shadow: 0 0 6px rgba(77,209,196,0.15); }
+    50% { box-shadow: 0 0 10px rgba(77,209,196,0.25); }
+  }
+  @keyframes blobMorphSlow {
+    0%, 100% { border-radius: 60% 40% 55% 45% / 45% 55% 40% 60%; }
+    50% { border-radius: 45% 55% 40% 60% / 60% 40% 55% 45%; }
+  }
+  @keyframes blobGlowFaint {
+    0%, 100% { border-radius: 60% 40% 55% 45% / 45% 55% 40% 60%; opacity: 0.12; }
+    50% { border-radius: 45% 55% 40% 60% / 60% 40% 55% 45%; opacity: 0.2; }
+  }
+  @keyframes dash {
+    to { stroke-dashoffset: -200; }
+  }
+  @keyframes nodeGlowRingSlow {
+    0%, 100% { transform: scale(1); opacity: 0.2; }
+    50% { transform: scale(1.4); opacity: 0; }
+  }
+
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+
+  .code-pill-faded {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(77,209,196,0.05);
+    border: 1px solid rgba(77,209,196,0.15);
+    color: rgba(77,209,196,0.5);
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    border-radius: 8px;
+    padding: 1px 8px;
+    vertical-align: baseline;
+  }
+</style>
+</head>
+<body class="bg-[#1a1a1a] text-[#e4e4e7] font-sans overflow-hidden h-screen flex flex-col selection:bg-[#4dd1c4]/20">
+
+<!-- ═══ ZONE 1 — TOP BAR (h-10 = 40px) ═══ -->
+<header class="h-10 bg-[#141414] border-b border-[#2a2a2a] flex items-center justify-between px-4 shrink-0">
+  <div class="flex items-center gap-3">
+    <span class="text-white font-semibold text-[14px] tracking-tight">CODIEY</span>
+    <div class="w-px h-4 bg-[#2a2a2a]"></div>
+    <span class="text-[#a1a1aa] text-[13px] font-mono">portfolio-app</span>
+  </div>
+  <div class="flex items-center gap-4">
+    <div class="flex items-center gap-1.5">
+      <div class="w-1.5 h-1.5 rounded-full bg-[#52525b]"></div>
+      <span class="text-[#52525b] text-[11px] font-mono tracking-wide">REC</span>
+    </div>
+    <button class="border border-[#f85149]/50 bg-[#f85149]/10 text-[#f85149] text-[11px] rounded-md px-3 py-1 hover:bg-[#f85149]/20 transition-colors cursor-pointer">
+      End Session
+    </button>
+  </div>
+</header>
+
+<!-- ═══ MAIN CONTENT ═══ -->
+<main class="flex-1 flex overflow-hidden">
+
+  <!-- ═══ ZONE 2 — LEFT SIDEBAR (280px) ═══ -->
+  <aside class="w-[280px] bg-[#141414] border-r border-[#2a2a2a] flex flex-col shrink-0">
+
+    <!-- Section A: Reasoning Graph (top ~60%) — settled, quiet -->
+    <div class="flex-[6] flex flex-col min-h-0">
+      <div class="flex items-center justify-between px-4 py-3 shrink-0">
+        <span class="text-[10px] uppercase tracking-[0.15em] text-[#52525b] font-medium">Reasoning Graph</span>
+        <span class="bg-[#4dd1c4]/10 text-[#4dd1c4]/60 text-[9px] font-mono px-2 py-0.5 rounded-full">7 nodes</span>
+      </div>
+
+      <div class="flex-1 relative overflow-hidden">
+        <!-- SVG arrows — static, no animation -->
+        <svg class="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrow" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto">
+              <polygon points="0 0, 6 2.5, 0 5" fill="#3f3f46"/>
+            </marker>
+          </defs>
+          <!-- auth.py → validate_token() -->
+          <line x1="62" y1="52" x2="108" y2="118" stroke="#3f3f46" stroke-width="1" marker-end="url(#arrow)" stroke-dasharray="4 3" style="animation: dash 30s linear infinite;"/>
+          <!-- auth.py → middleware.py -->
+          <line x1="82" y1="40" x2="178" y2="72" stroke="#3f3f46" stroke-width="1" marker-end="url(#arrow)" stroke-dasharray="4 3" style="animation: dash 30s linear infinite;"/>
+          <!-- validate_token() → jwt_helper.py -->
+          <line x1="120" y1="152" x2="78" y2="210" stroke="#3f3f46" stroke-width="1" marker-end="url(#arrow)" stroke-dasharray="4 3" style="animation: dash 30s linear infinite;"/>
+          <!-- jwt_helper.py → config.py -->
+          <line x1="98" y1="230" x2="168" y2="290" stroke="#3f3f46" stroke-width="1" marker-end="url(#arrow)" stroke-dasharray="4 3" style="animation: dash 30s linear infinite;"/>
+          <!-- validate_token() → session.py -->
+          <line x1="160" y1="140" x2="210" y2="190" stroke="#3f3f46" stroke-width="1" marker-end="url(#arrow)" stroke-dasharray="4 3" style="animation: dash 30s linear infinite;"/>
+          <!-- middleware.py → routes.py -->
+          <line x1="208" y1="90" x2="220" y2="145" stroke="#3f3f46" stroke-width="1" marker-end="url(#arrow)" stroke-dasharray="4 3" style="animation: dash 30s linear infinite;"/>
+        </svg>
+
+        <!-- Node: auth.py (visited) -->
+        <div class="absolute" style="top:28px; left:30px;">
+          <div class="flex items-center gap-2">
+            <div class="w-[10px] h-[10px] rounded-full bg-[#4dd1c4] shrink-0"></div>
+            <span class="text-[12px] font-mono text-white whitespace-nowrap">auth.py</span>
+          </div>
+        </div>
+
+        <!-- Node: middleware.py (visited) -->
+        <div class="absolute" style="top:62px; left:168px;">
+          <div class="flex items-center gap-2">
+            <div class="w-[10px] h-[10px] rounded-full bg-[#4dd1c4] shrink-0"></div>
+            <span class="text-[12px] font-mono text-white whitespace-nowrap">middleware.py</span>
+          </div>
+        </div>
+
+        <!-- Node: validate_token() (active — very slow, faint glow only) -->
+        <div class="absolute" style="top:115px; left:68px;">
+          <div class="flex items-center gap-2">
+            <div class="relative shrink-0">
+              <div class="absolute inset-0 w-[12px] h-[12px] rounded-full bg-[#4dd1c4]/20" style="animation: nodeGlowRingSlow 5s ease-in-out infinite;"></div>
+              <div class="w-[12px] h-[12px] rounded-full bg-[#4dd1c4]" style="animation: glowPulseFaint 5s ease-in-out infinite;"></div>
+            </div>
+            <span class="text-[12px] font-mono text-[#4dd1c4]/80 whitespace-nowrap">validate_token()</span>
+          </div>
+        </div>
+
+        <!-- Node: jwt_helper.py (visited) -->
+        <div class="absolute" style="top:210px; left:36px;">
+          <div class="flex items-center gap-2">
+            <div class="w-[10px] h-[10px] rounded-full bg-[#4dd1c4] shrink-0"></div>
+            <span class="text-[12px] font-mono text-white whitespace-nowrap">jwt_helper.py</span>
+          </div>
+        </div>
+
+        <!-- Node: config.py (unvisited — hollow) -->
+        <div class="absolute" style="top:285px; left:150px;">
+          <div class="flex items-center gap-2">
+            <div class="w-[8px] h-[8px] rounded-full border border-[#52525b] shrink-0"></div>
+            <span class="text-[12px] font-mono text-[#52525b] whitespace-nowrap">config.py</span>
+          </div>
+        </div>
+
+        <!-- Node: session.py (unvisited — hollow) -->
+        <div class="absolute" style="top:188px; left:198px;">
+          <div class="flex items-center gap-2">
+            <div class="w-[8px] h-[8px] rounded-full border border-[#52525b] shrink-0"></div>
+            <span class="text-[12px] font-mono text-[#52525b] whitespace-nowrap">session.py</span>
+          </div>
+        </div>
+
+        <!-- Node: routes.py (unvisited — hollow) -->
+        <div class="absolute" style="top:148px; left:208px;">
+          <div class="flex items-center gap-2">
+            <div class="w-[8px] h-[8px] rounded-full border border-[#52525b] shrink-0"></div>
+            <span class="text-[12px] font-mono text-[#52525b] whitespace-nowrap">routes.py</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Separator -->
+    <div class="h-px bg-[#2a2a2a] shrink-0"></div>
+
+    <!-- Section B: Session Rules (bottom ~40%) -->
+    <div class="flex-[4] flex flex-col px-4 py-3 min-h-0">
+      <div class="flex items-center gap-2 mb-3 shrink-0">
+        <span class="text-[10px] uppercase tracking-[0.15em] text-[#52525b] font-medium">Learned This Session</span>
+      </div>
+      <div class="space-y-2.5 overflow-y-auto">
+        <div class="flex items-start gap-2.5">
+          <div class="w-[5px] h-[5px] rounded-full bg-[#4dd1c4] mt-[5px] shrink-0"></div>
+          <span class="text-[11px] font-mono text-[#a1a1aa] leading-relaxed truncate">JWT secrets loaded from .env not config</span>
+        </div>
+        <div class="flex items-start gap-2.5">
+          <div class="w-[5px] h-[5px] rounded-full bg-[#4dd1c4] mt-[5px] shrink-0"></div>
+          <span class="text-[11px] font-mono text-[#a1a1aa] leading-relaxed truncate">Auth middleware runs before rate limiter</span>
+        </div>
+        <div class="flex items-start gap-2.5 border-l-2 border-[#4dd1c4]/60 pl-2 -ml-[2px]">
+          <div class="w-[5px] h-[5px] rounded-full bg-[#4dd1c4] mt-[5px] shrink-0"></div>
+          <span class="text-[11px] font-mono text-[#e4e4e7] leading-relaxed truncate">Token refresh handled in auth.py line 47</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══ ZONE 3 — CENTER PANEL ═══ -->
+  <section class="flex-1 flex flex-col min-w-0 bg-[#1a1a1a]">
+
+    <!-- Breadcrumb Bar — dimmed, zinc-600, no italic -->
+    <nav class="h-9 bg-[#141414] border-b border-[#2a2a2a] flex items-center px-5 shrink-0 gap-1.5">
+      <span class="text-[13px] font-mono text-[#3f3f46]">src</span>
+      <span class="text-[13px] text-[#3f3f46] mx-0.5">›</span>
+      <span class="text-[13px] font-mono text-[#3f3f46]">auth</span>
+      <span class="text-[13px] text-[#3f3f46] mx-0.5">›</span>
+      <span class="text-[13px] font-mono text-[#3f3f46]">validate_token()</span>
+    </nav>
+
+    <!-- Conversation Area — last exchange only, faded -->
+    <div class="flex-1 overflow-y-auto px-6 py-5 flex items-end">
+      <div class="max-w-2xl mx-auto w-full space-y-8 opacity-50">
+
+        <!-- User Message — faded -->
+        <div class="flex items-start gap-2">
+          <svg class="w-[14px] h-[14px] text-[#52525b] mt-[3px] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+          </svg>
+          <p class="text-[15px] italic text-[#52525b] leading-relaxed">"How is authentication structured in this codebase?"</p>
+        </div>
+
+        <!-- Codiey Response — faded to zinc-500, no cursor -->
+        <div class="text-[17px] text-[#52525b] leading-[1.7]">
+          I've traced through the auth layer. The entry point is
+          <span class="code-pill-faded">middleware.py</span>
+          which calls
+          <span class="code-pill-faded">validate_token()</span>
+          inside
+          <span class="code-pill-faded">auth.py</span>.
+          That function pulls the JWT secret from environment variables — not from the config file, which is the right call. The token is then verified in
+          <span class="code-pill-faded">jwt_helper.py</span>
+          before the request continues to your route handlers. One thing worth noting: the refresh logic lives inside
+          <span class="code-pill-faded">auth.py</span>
+          at line 47, separate from validation.
+        </div>
+      </div>
+    </div>
+
+    <!-- Tool Call Toast: HIDDEN -->
+
+    <!-- Voice Input Area (h-20 = 80px) -->
+    <div class="h-20 bg-[#141414] border-t border-[#2a2a2a] flex items-center px-5 gap-5 shrink-0">
+
+      <!-- Orb — slowest breath, barely moving, very dim glow -->
+      <div class="relative w-[52px] h-[52px] shrink-0">
+        <div class="absolute inset-[-8px] bg-[#4dd1c4]/10" style="border-radius: 60% 40% 55% 45% / 45% 55% 40% 60%; animation: blobGlowFaint 6s ease-in-out infinite; filter: blur(12px);"></div>
+        <div class="relative w-[52px] h-[52px] bg-[#0d3d38] flex items-center justify-center" style="border-radius: 60% 40% 55% 45% / 45% 55% 40% 60%; animation: blobMorphSlow 6s ease-in-out infinite;">
+          <div class="w-1 h-1 rounded-full bg-[#4dd1c4] shadow-[0_0_4px_rgba(77,209,196,0.3)]"></div>
+        </div>
+      </div>
+
+      <!-- Waveform — completely still, flat 4px bars, zinc-700 -->
+      <div class="flex-1 flex items-center justify-center gap-[2px] h-10">
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+        <div class="w-[3px] h-[4px] bg-[#3f3f46] rounded-full"></div>
+      </div>
+
+      <!-- CTX Meter -->
+      <div class="flex flex-col items-center gap-1 shrink-0">
+        <span class="text-[8px] font-mono text-[#52525b] uppercase">CTX</span>
+        <div class="w-3 h-14 bg-[#2a2a2a] rounded-md relative overflow-hidden">
+          <div class="absolute bottom-0 w-full rounded-b-md bg-[#4dd1c4]" style="height:34%; box-shadow: 0 0 8px rgba(77,209,196,0.25);"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ZONE 4 — RIGHT CODE PANEL: HIDDEN -->
+
+</main>
+
+<!-- ═══ ZONE 5 — STATUS BAR (h-7 = 28px) ═══ -->
+<footer class="h-7 bg-[#0f7b6c] flex items-center justify-between px-3 shrink-0">
+  <div class="flex items-center gap-2">
+    <div class="w-[6px] h-[6px] rounded-full bg-white/80 animate-pulse"></div>
+    <span class="text-[11px] text-white/80 font-medium">LISTENING</span>
+  </div>
+  <div class="flex items-center gap-1.5">
+    <span class="text-[11px] text-white font-semibold">CODIEY</span>
+    <span class="text-[11px] font-mono text-white/60 ml-1">14:23</span>
+  </div>
+  <div class="flex items-center gap-2 text-[10px] font-mono">
+    <span class="text-white/50">Gemini 2.0 Flash Live</span>
+    <span class="text-white/30">·</span>
+    <span class="text-white/50">12ms</span>
+    <span class="text-white/30">·</span>
+    <span class="text-white/40">48KHZ MONO</span>
+  </div>
+</footer>
+
+<!-- Subtle film grain overlay -->
+<canvas id="grain" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;opacity:0.018;z-index:99;"></canvas>
+<script>
+(function() {
+  const c = document.getElementById('grain');
+  const ctx = c.getContext('2d');
+  function resize() { c.width = window.innerWidth; c.height = window.innerHeight; }
+  function draw() {
+    const d = ctx.createImageData(c.width, c.height);
+    for (let i = 0; i < d.data.length; i += 4) {
+      const v = Math.random() * 255;
+      d.data[i] = v; d.data[i+1] = v; d.data[i+2] = v; d.data[i+3] = 255;
+    }
+    ctx.putImageData(d, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+  draw();
+  setInterval(draw, 120);
+})();
+</script>
+</body>
+</html>

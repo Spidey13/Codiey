@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codiey — Codebase Thinking Partner</title>
+    <meta name="description" content="Voice-first codebase thinking partner. Talk to your code, interrupt to redirect.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<!-- ═══ ZONE 1 — TOP BAR ═══ -->
+<header id="top-bar">
+    <div class="top-bar-left">
+        <span class="wordmark">CODIEY</span>
+        <div class="top-bar-divider"></div>
+        <span id="project-name" class="project-name">—</span>
+    </div>
+    <div class="top-bar-right">
+        <div class="rec-indicator">
+            <span class="rec-dot"></span>
+            <span class="rec-label">REC</span>
+        </div>
+        <button id="session-btn" class="btn-end-session hidden" onclick="endSession()">End Session</button>
+    </div>
+</header>
+
+<!-- ═══ MAIN LAYOUT ═══ -->
+<main id="main-layout">
+
+    <!-- ═══ ZONE 2 — LEFT SIDEBAR ═══ -->
+    <aside id="left-sidebar">
+        <!-- Section A: Reasoning Graph (top ~60%) -->
+        <div id="graph-section">
+            <div class="sidebar-header">
+                <span class="sidebar-label">Reasoning Graph</span>
+                <span id="node-count-badge" class="node-badge">0 nodes</span>
+            </div>
+            <div id="graph-canvas">
+                <svg id="graph-svg" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <marker id="arrow" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto">
+                            <polygon points="0 0, 6 2.5, 0 5" fill="#3f3f46"/>
+                        </marker>
+                    </defs>
+                </svg>
+                <div id="graph-nodes"></div>
+            </div>
+        </div>
+
+        <div class="sidebar-separator"></div>
+
+        <!-- Section B: Session Rules (bottom ~40%) -->
+        <div id="rules-section">
+            <div class="sidebar-header">
+                <span class="sidebar-label">Learned This Session</span>
+            </div>
+            <div id="rules-list"></div>
+        </div>
+    </aside>
+
+    <!-- ═══ ZONE 3 — CENTER PANEL ═══ -->
+    <section id="center-panel">
+        <!-- Breadcrumb Bar -->
+        <nav id="breadcrumb-bar">
+            <span class="breadcrumb-segment breadcrumb-muted">—</span>
+        </nav>
+
+        <!-- Messages Area -->
+        <div id="messages-area">
+            <div id="messages-container"></div>
+        </div>
+
+        <!-- Tool Call Toast Container -->
+        <div id="tool-toast-container"></div>
+
+        <!-- Voice Input Area -->
+        <div id="voice-input">
+            <!-- Orb -->
+            <div id="orb" class="orb-container">
+                <div class="orb-glow"></div>
+                <div class="orb-body">
+                    <div class="orb-dot"></div>
+                </div>
+            </div>
+
+            <!-- Waveform -->
+            <div id="waveform">
+                <span class="bar" style="--h:12px"></span>
+                <span class="bar" style="--h:18px"></span>
+                <span class="bar" style="--h:8px"></span>
+                <span class="bar" style="--h:22px"></span>
+                <span class="bar" style="--h:14px"></span>
+                <span class="bar" style="--h:10px"></span>
+                <span class="bar" style="--h:20px"></span>
+                <span class="bar" style="--h:6px"></span>
+                <span class="bar" style="--h:16px"></span>
+                <span class="bar" style="--h:24px"></span>
+                <span class="bar" style="--h:10px"></span>
+                <span class="bar" style="--h:18px"></span>
+                <span class="bar" style="--h:8px"></span>
+                <span class="bar" style="--h:14px"></span>
+                <span class="bar" style="--h:20px"></span>
+                <span class="bar" style="--h:6px"></span>
+                <span class="bar" style="--h:22px"></span>
+                <span class="bar" style="--h:12px"></span>
+                <span class="bar" style="--h:16px"></span>
+                <span class="bar" style="--h:8px"></span>
+                <span class="bar" style="--h:18px"></span>
+                <span class="bar" style="--h:10px"></span>
+                <span class="bar" style="--h:24px"></span>
+                <span class="bar" style="--h:14px"></span>
+                <span class="bar" style="--h:6px"></span>
+                <span class="bar" style="--h:20px"></span>
+                <span class="bar" style="--h:10px"></span>
+                <span class="bar" style="--h:16px"></span>
+                <span class="bar" style="--h:22px"></span>
+                <span class="bar" style="--h:8px"></span>
+            </div>
+
+            <!-- CTX Meter -->
+            <div id="ctx-meter">
+                <span class="ctx-label">CTX</span>
+                <div class="ctx-track">
+                    <div id="ctx-fill" class="ctx-fill"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ ZONE 4 — RIGHT CODE PANEL ═══ -->
+    <aside id="code-panel" class="hidden">
+        <div class="code-panel-header">
+            <div class="code-panel-file">
+                <span id="code-lang-dot" class="lang-dot"></span>
+                <span id="code-filename" class="code-filename">—</span>
+            </div>
+            <span id="code-changed" class="code-changed">—</span>
+        </div>
+        <div id="code-body" class="code-body"></div>
+        <div id="ghost-diff" class="ghost-diff hidden"></div>
+        <div class="code-panel-footer">
+            <span class="open-editor-link">open in editor →</span>
+        </div>
+    </aside>
+</main>
+
+<!-- ═══ ZONE 5 — STATUS BAR ═══ -->
+<footer id="status-bar">
+    <div class="status-left">
+        <span id="status-dot" class="status-dot status-disconnected"></span>
+        <span id="status-text">Disconnected</span>
+    </div>
+    <div class="status-center">
+        <span class="status-wordmark">CODIEY</span>
+        <span id="session-timer" class="status-timer">0:00</span>
+    </div>
+    <div class="status-right">
+        <span>Gemini 2.0 Flash Live</span>
+        <span class="status-sep">·</span>
+        <span>12ms</span>
+        <span class="status-sep">·</span>
+        <span class="status-dim">48KHZ MONO</span>
+    </div>
+</footer>
+
+<!-- ═══ WELCOME SCREEN (overlay) ═══ -->
+<div id="welcome-screen" class="welcome-overlay">
+    <div class="welcome-card">
+        <div class="orb-container" style="margin: 0 auto 24px;">
+            <div class="orb-glow"></div>
+            <div class="orb-body">
+                <div class="orb-dot"></div>
+            </div>
+        </div>
+        <h1 class="welcome-title">Talk to your codebase</h1>
+        <p class="welcome-subtitle">
+            Start a voice session to reason about your code.<br>
+            Interrupt anytime to redirect the conversation.
+        </p>
+        <button class="btn-start-session" onclick="startSession()">Start Session</button>
+        <p class="welcome-hint">Make sure you're wearing headphones to prevent echo.</p>
+    </div>
+</div>
+
+<!-- Hidden debug log for updateDebugPanel() compat -->
+<div id="debug-log" class="hidden"></div>
+
+<!-- Film grain overlay -->
+<canvas id="grain"></canvas>
+<script>
+(function() {
+    const c = document.getElementById('grain');
+    const ctx = c.getContext('2d');
+    function resize() { c.width = window.innerWidth; c.height = window.innerHeight; }
+    function draw() {
+        const d = ctx.createImageData(c.width, c.height);
+        for (let i = 0; i < d.data.length; i += 4) {
+            const v = Math.random() * 255;
+            d.data[i] = v; d.data[i+1] = v; d.data[i+2] = v; d.data[i+3] = 255;
+        }
+        ctx.putImageData(d, 0, 0);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+    draw();
+    setInterval(draw, 120);
+})();
+</script>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
