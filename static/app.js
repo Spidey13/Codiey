@@ -51,6 +51,12 @@ const state = {
     fullTrace: [],        // Full trace with ms-level timing
     sessionStartMs: 0,    // performance.now() at session start
     sessionLogger: null,  // Persistent logger instance
+    lastToolCall: null,
+    lastToolResult: null,
+    lastServerContentKeys: null,
+    lastTopLevelKeys: null,
+    lastInboundAtMs: null,
+    silenceTimer: null,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -67,6 +73,8 @@ async function toggleSession() {
 
 async function startSession() {
     updateStatus("connecting", "Scanning workspace...");
+    const rulesList = document.getElementById("rules-list");
+    if (rulesList) rulesList.innerHTML = "";
 
     try {
         const storedHandle = localStorage.getItem('codiey_resumption_token');
@@ -156,7 +164,9 @@ When interrupted: acknowledge briefly, confirm the new direction, connect old an
 
 Never use uncertain language — 'likely', 'probably', 'appears to be', 'suggests' — when a tool call can verify the answer. If you are uncertain, say "let me check" and use a tool. Never guess.
 
-Tools: grep_search, file_search, list_directory, read_file, get_function_info, mark_as_discussed, write_to_rules`;
+Tools: grep_search, file_search, list_directory, read_file, get_function_info, mark_as_discussed, write_to_rules
+
+Whenever you learn a stable, reusable fact about the user or codebase, call write_to_rules immediately with a single-sentence insight. Do this proactively without being asked. Do not repeat existing rules.`;
 
     // codebaseSummary already has rules first, then directory tree (from summary_builder.py)
     const projectContext = state.codebaseSummary
@@ -207,6 +217,16 @@ Tools: grep_search, file_search, list_directory, read_file, get_function_info, m
 
     state.ws.send(JSON.stringify(setupMessage));
     console.log("📤 Setup message sent (with tools + codebase summary)");
+    if (state.sessionLogger) {
+        const toolNames = getDeclaredToolNames();
+        state.sessionLogger.log('SETUP_SENT', 'Setup sent', {
+            model: GEMINI_MODEL,
+            hasTools: toolNames.length > 0,
+            toolCount: toolNames.length,
+            toolNames,
+            hasSummary: !!state.codebaseSummary,
+        });
+    }
 }
 
 function handleWebSocketClose(event) {
@@ -220,6 +240,12 @@ function handleWebSocketClose(event) {
             code: event.code,
             reason: event.reason,
             wasClean: event.wasClean,
+            lastToolCall: state.lastToolCall,
+            lastToolResult: state.lastToolResult,
+            lastServerContentKeys: state.lastServerContentKeys,
+            lastTopLevelKeys: state.lastTopLevelKeys,
+            lastInboundAtMs: state.lastInboundAtMs,
+            audioState: state.audioState,
         });
         state.sessionLogger.flush();
     }
@@ -441,6 +467,9 @@ async function saveTraces() {
 // ════════════════════════════════════════════════════════════════
 
 function handleGeminiMessage(data) {
+    state.lastTopLevelKeys = Object.keys(data);
+    state.lastInboundAtMs = Math.round(performance.now());
+
     // Setup complete — start capturing audio
     if (data.setupComplete) {
         debugLog('🏁', 'SETUP', 'Setup complete from Gemini');
@@ -450,6 +479,7 @@ function handleGeminiMessage(data) {
 
     const sc = data.serverContent;
     if (sc) {
+        state.lastServerContentKeys = Object.keys(sc);
         // 1. Interruption — flush audio immediately
         if (sc.interrupted) {
             debugLog('�', 'INTERRUPT', 'Model was interrupted by user speech');
@@ -466,6 +496,15 @@ function handleGeminiMessage(data) {
             }
             for (const part of sc.modelTurn.parts) {
                 if (part.inlineData && part.inlineData.data) {
+                    // Reset silence timer on every audio chunk
+                    if (state.silenceTimer) clearTimeout(state.silenceTimer);
+                    state.silenceTimer = setTimeout(() => {
+                        if (state.audioState === 'STREAMING') {
+                            state.audioState = 'IDLE';
+                            debugLog('🔇', 'AUDIO_GATE', 'Model audio silent — mic gated');
+                        }
+                    }, 300);
+
                     state.audioChunksReceived++;
                     if (state.audioChunksReceived % 10 === 1) {
                         const sizeKB = (part.inlineData.data.length * 0.75 / 1024).toFixed(1);
@@ -516,6 +555,7 @@ function handleGeminiMessage(data) {
         // 5. Turn complete
         if (sc.turnComplete) {
             debugLog('✅', 'TURN', 'Turn complete');
+            if (state.silenceTimer) clearTimeout(state.silenceTimer);
             state.currentAssistantMsg = null;
             state.audioState = 'IDLE'; // Start silent gating
             setSessionState("listening");
@@ -542,6 +582,12 @@ function handleGeminiMessage(data) {
             state.sessionLogger.flush(); // Flush immediately — this is where crashes happen
         }
         handleToolCall(data.toolCall);
+    }
+    if (data.toolCallCancellation) {
+        debugLog('warn', 'TOOL_CANCEL', `Tool call cancelled: ${JSON.stringify(data.toolCallCancellation)}`);
+        if (state.sessionLogger) {
+            state.sessionLogger.log('TOOL_CANCEL', 'Tool call cancelled', { toolCallCancellation: data.toolCallCancellation });
+        }
     }
 
     // Log any completely unrecognized top-level keys
@@ -856,16 +902,47 @@ class AudioPlayer {
 // having called these tools. No UI indicator is shown either.
 const TIER2_SILENT_TOOLS = new Set(['mark_as_discussed', 'write_to_rules']);
 
+function getDeclaredToolNames() {
+    const names = [];
+    const decls = state.toolDeclarations || [];
+    for (const entry of decls) {
+        if (entry && Array.isArray(entry.functionDeclarations)) {
+            for (const fn of entry.functionDeclarations) {
+                if (fn && fn.name) names.push(fn.name);
+            }
+        } else if (entry && entry.name) {
+            names.push(entry.name);
+        }
+    }
+    return names;
+}
+
 async function handleToolCall(toolCall) {
     const functionCalls = toolCall.functionCalls || [];
     debugLog('🔧', 'TOOL_CALL', `${functionCalls.length} tool(s): ${functionCalls.map(fc => fc.name).join(', ')}`);
 
     setSessionState("analyzing");
 
+    state.lastToolCall = {
+        atMs: Math.round(performance.now()),
+        names: functionCalls.map(fc => fc.name),
+        args: functionCalls.map(fc => Object.keys(fc.args || {})),
+    };
+
+    const declared = new Set(getDeclaredToolNames());
+    const unknownCalls = functionCalls.filter(fc => !declared.has(fc.name));
+    if (unknownCalls.length) {
+        const names = unknownCalls.map(fc => fc.name).join(', ');
+        debugLog('warn', 'TOOL_UNKNOWN', `Undeclared tool(s): ${names}`);
+        if (state.sessionLogger) {
+            state.sessionLogger.log('TOOL_UNKNOWN', 'Undeclared tool(s) requested', { names, toolCall });
+        }
+    }
+
     // Wire write_to_rules tool to addRule()
     for (const fc of functionCalls) {
-        if (fc.name === 'write_to_rules' && fc.args && fc.args.content) {
-            addRule(fc.args.content);
+        if (fc.name === 'write_to_rules' && fc.args && fc.args.insight) {
+            addRule(fc.args.insight);
         }
     }
 
@@ -883,6 +960,7 @@ async function handleToolCall(toolCall) {
                 .join(', ')
             : '';
         addToolMessage(`🔧 ${fc.name}(${displayArgs})`);
+        debugLog('🔧', 'TOOL_ARGS', `${fc.name} args=[${displayArgs}]`);
     }
 
     if (entersToolPending) {
@@ -899,8 +977,20 @@ async function handleToolCall(toolCall) {
                     body: JSON.stringify({ tool_name: fc.name, args: fc.args || {} })
                 });
 
+                if (!res.ok) {
+                    debugLog('warn', 'TOOL_HTTP', `${fc.name} HTTP ${res.status}`);
+                }
+
                 const result = await res.json();
+                state.lastToolResult = { name: fc.name, result };
                 debugLog('✅', 'TOOL_RESULT', `${fc.name} → ${JSON.stringify(result).substring(0, 100)}...`);
+
+                if (result && result.error) {
+                    debugLog('warn', 'TOOL_ERROR', `${fc.name} error: ${result.error}`);
+                    if (state.sessionLogger) {
+                        state.sessionLogger.log('TOOL_ERROR', 'Tool returned error', { name: fc.name, error: result.error });
+                    }
+                }
 
                 // Extract filename from tool args/results for graph visualization
                 const toolFilename = fc.args?.path || fc.args?.filename || fc.args?.file || fc.args?.name || null;
