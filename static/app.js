@@ -711,16 +711,7 @@ async function startAudioCapture() {
                     break;
 
                 case 'TOOL_PENDING':
-                    // Buffer locally, monitor for user speech
-                    state.audioBuffer.push(data);
-                    if (energy > ENERGY_THRESHOLD) {
-                        // User is speaking during tool call — flush buffer to Gemini
-                        for (const chunk of state.audioBuffer) {
-                            sendAudioChunk(chunk);
-                        }
-                        state.audioBuffer = [];
-                        state.audioState = 'STREAMING';
-                    }
+                    // Ignore mic input during tool calls — no interruption until tool completes
                     break;
             }
         };
