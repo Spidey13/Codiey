@@ -491,20 +491,8 @@ function handleGeminiMessage(data) {
 
         // 2. Model audio output
         if (sc.modelTurn && sc.modelTurn.parts) {
-            if (state.audioState === 'IDLE') {
-                state.audioState = 'STREAMING'; // Allow barge-in during model speech
-            }
             for (const part of sc.modelTurn.parts) {
                 if (part.inlineData && part.inlineData.data) {
-                    // Reset silence timer on every audio chunk
-                    if (state.silenceTimer) clearTimeout(state.silenceTimer);
-                    state.silenceTimer = setTimeout(() => {
-                        if (state.audioState === 'STREAMING') {
-                            state.audioState = 'IDLE';
-                            debugLog('🔇', 'AUDIO_GATE', 'Model audio silent — mic gated');
-                        }
-                    }, 300);
-
                     state.audioChunksReceived++;
                     if (state.audioChunksReceived % 10 === 1) {
                         const sizeKB = (part.inlineData.data.length * 0.75 / 1024).toFixed(1);
@@ -698,13 +686,24 @@ async function startAudioCapture() {
 
             switch (state.audioState) {
                 case 'STREAMING':
-                    sendAudioChunk(data);
+                    if (energy > ENERGY_THRESHOLD) {
+                        state.lastVoiceMs = performance.now();
+                        sendAudioChunk(data);
+                    } else {
+                        // Stream tail silence for 500ms to preserve natural speech endings
+                        if (performance.now() - (state.lastVoiceMs || 0) > 500) {
+                            state.audioState = 'IDLE';
+                        } else {
+                            sendAudioChunk(data);
+                        }
+                    }
                     break;
 
                 case 'IDLE':
                     // Silent gating: only resume when voice detected
                     if (energy > ENERGY_THRESHOLD) {
                         state.audioState = 'STREAMING';
+                        state.lastVoiceMs = performance.now();
                         sendAudioChunk(data);
                     }
                     // Otherwise: discard silent chunk
@@ -985,7 +984,7 @@ async function handleToolCall(toolCall) {
 
                 // Extract filename from tool args/results for graph visualization
                 const toolFilename = fc.args?.path || fc.args?.filename || fc.args?.file || fc.args?.name || null;
-                if (toolFilename) {
+                if (toolFilename && typeof graphState !== 'undefined') {
                     const shortName = toolFilename.split('/').pop().split('\\').pop();
                     const prevActive = Object.keys(graphState.nodes).find(k => graphState.nodes[k].state === 'active');
                     const rx = 30 + Math.random() * 190;
