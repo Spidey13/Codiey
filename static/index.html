@@ -1,14 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" style="color-scheme: dark;">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a1a1a">
     <title>Codiey — Codebase Thinking Partner</title>
     <meta name="description" content="Voice-first codebase thinking partner. Talk to your code, interrupt to redirect.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.18/dist/bundle.min.js"></script>
 </head>
 <body>
 
@@ -24,26 +28,26 @@
             <span class="rec-dot"></span>
             <span class="rec-label">REC</span>
         </div>
-        <button id="session-btn" class="btn-end-session hidden" onclick="endSession()">End Session</button>
+        <button id="session-btn" class="btn-end-session hidden" onclick="endSession()" aria-label="End current session">End Session</button>
     </div>
 </header>
 
 <!-- ═══ MAIN LAYOUT ═══ -->
 <main id="main-layout">
 
-    <!-- ═══ ZONE 2 — LEFT SIDEBAR ═══ -->
-    <aside id="left-sidebar">
-        <!-- Section A: Reasoning Graph (top ~60%) -->
+    <!-- ═══ ZONE 2 — GRAPH PANEL (LEFT, 55-60%) ═══ -->
+    <section id="graph-panel">
+        <!-- Reasoning Graph Canvas -->
         <div id="graph-section">
-            <div class="sidebar-header">
-                <span class="sidebar-label">Reasoning Graph</span>
+            <div class="graph-header">
+                <span class="graph-label">Reasoning Canvas</span>
                 <span id="node-count-badge" class="node-badge">0 nodes</span>
             </div>
             <div id="graph-canvas">
                 <svg id="graph-svg" xmlns="http://www.w3.org/2000/svg">
                     <defs>
-                        <marker id="arrow" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto">
-                            <polygon points="0 0, 6 2.5, 0 5" fill="#3f3f46"/>
+                        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                            <polygon points="0 0, 8 3, 0 6" fill="#4dd1c4"/>
                         </marker>
                     </defs>
                 </svg>
@@ -51,44 +55,48 @@
             </div>
         </div>
 
-        <div class="sidebar-separator"></div>
-
-        <!-- Section B: Session Rules (bottom ~40%) -->
-        <div id="rules-section">
-            <div class="sidebar-header">
-                <span class="sidebar-label">Learned This Session</span>
+        <!-- Floating Learned Insights Overlay -->
+        <div id="insights-overlay" class="insights-collapsed">
+            <button id="insights-toggle" class="insights-toggle" aria-label="Toggle learned insights panel">
+                <span id="insights-count" class="insights-count">0 insights</span>
+                <span class="insights-chevron">▲</span>
+            </button>
+            <div id="insights-panel" class="insights-panel hidden">
+                <div class="insights-header">
+                    <span class="insights-title">Learned This Session</span>
+                </div>
+                <div id="rules-list" class="insights-list"></div>
             </div>
-            <div id="rules-list"></div>
         </div>
-    </aside>
+    </section>
 
-    <!-- ═══ ZONE 3 — CENTER PANEL ═══ -->
-    <section id="center-panel">
+    <!-- ═══ ZONE 3 — CONVERSATION PANEL (RIGHT, 40-45%) ═══ -->
+    <section id="conversation-panel">
         <!-- Breadcrumb Bar -->
-        <nav id="breadcrumb-bar">
+        <nav id="breadcrumb-bar" aria-label="Current file context">
             <span class="breadcrumb-segment breadcrumb-muted">—</span>
         </nav>
 
         <!-- Messages Area -->
-        <div id="messages-area">
+        <div id="messages-area" role="log" aria-live="polite" aria-label="Conversation transcript">
             <div id="messages-container"></div>
         </div>
 
         <!-- Tool Call Toast Container -->
-        <div id="tool-toast-container"></div>
+        <div id="tool-toast-container" role="status" aria-live="polite"></div>
 
         <!-- Voice Input Area -->
         <div id="voice-input">
             <!-- Orb -->
-            <div id="orb" class="orb-container">
+            <button id="orb" class="orb-container" aria-label="Voice input status indicator" tabindex="-1">
                 <div class="orb-glow"></div>
                 <div class="orb-body">
                     <div class="orb-dot"></div>
                 </div>
-            </div>
+            </button>
 
             <!-- Waveform -->
-            <div id="waveform">
+            <div id="waveform" aria-hidden="true">
                 <span class="bar" style="--h:12px"></span>
                 <span class="bar" style="--h:18px"></span>
                 <span class="bar" style="--h:8px"></span>
@@ -122,7 +130,7 @@
             </div>
 
             <!-- CTX Meter -->
-            <div id="ctx-meter">
+            <div id="ctx-meter" aria-label="Context usage">
                 <span class="ctx-label">CTX</span>
                 <div class="ctx-track">
                     <div id="ctx-fill" class="ctx-fill"></div>
@@ -181,7 +189,7 @@
             Start a voice session to reason about your code.<br>
             Interrupt anytime to redirect the conversation.
         </p>
-        <button class="btn-start-session" onclick="startSession()">Start Session</button>
+        <button class="btn-start-session" onclick="startSession()" aria-label="Start voice session">Start Session</button>
         <p class="welcome-hint">Make sure you're wearing headphones to prevent echo.</p>
     </div>
 </div>

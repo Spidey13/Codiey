@@ -18,7 +18,6 @@ const GEMINI_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
 const GEMINI_WS_BASE_URL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
 const INPUT_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
-const ENERGY_THRESHOLD = 0.005;
 
 // ════════════════════════════════════════════════════════════════
 // State
@@ -34,6 +33,7 @@ const state = {
 
     audioState: 'IDLE',
     audioBuffer: [],
+    isUserSpeaking: false,
 
     // Transcript state for streaming/appending
     currentUserMsg: null,
@@ -87,6 +87,13 @@ async function startSession() {
             fetch("/api/workspace/summary"),
             fetch("/api/key"),
         ]);
+        
+        let graphRes = null;
+        try {
+            graphRes = await fetch("/api/workspace/graph");
+        } catch(e) {
+            console.log("Graph fetch failed", e);
+        }
 
         if (!keyRes.ok) {
             const err = await keyRes.json();
@@ -106,6 +113,12 @@ async function startSession() {
             const summaryData = await summaryRes.json();
             state.codebaseSummary = summaryData.summary;
             console.log(`📁 Codebase summary loaded (${state.codebaseSummary.length} chars)`);
+        }
+
+        // Render base graph
+        if (graphRes.ok) {
+            const graphData = await graphRes.json();
+            renderBaseGraph(graphData);
         }
 
         updateStatus("connecting", "Connecting to Gemini...");
@@ -162,9 +175,22 @@ Speak only in English. Keep responses to 2-3 sentences, then wait. Ask clarifyin
 
 When interrupted: acknowledge briefly, confirm the new direction, connect old and new topics only if genuinely relevant, continue. Never restart cold. Always carry context forward.
 
-Never use uncertain language — 'likely', 'probably', 'appears to be', 'suggests' — when a tool call can verify the answer. If you are uncertain, say "let me check" and use a tool. Never guess.
+CRITICAL TOOL USAGE RULES (READ CAREFULLY):
+1. When user mentions a specific file name → IMMEDIATELY call read_file with that filename
+2. When user asks about patterns, imports, or code structure → IMMEDIATELY call grep_search
+3. When user asks "how does X work" and X is a file → IMMEDIATELY call read_file
+4. NEVER say "let me check", "I'll look at", "I'll read", or "I'll search" WITHOUT calling the tool IN THE SAME RESPONSE
+5. If you mention a file name in your response, you MUST call read_file for that file
 
-Tools: grep_search, file_search, list_directory, read_file, get_function_info, mark_as_discussed, write_to_rules
+BAD EXAMPLE (DON'T DO THIS):
+User: "How does parser.py work?"
+Bad Response: "Let me check that file for you." ❌ (talking about tool use, not using it)
+
+GOOD EXAMPLE (DO THIS):
+User: "How does parser.py work?"
+Good Response: [Immediately calls read_file with file_path="parser.py"] ✅
+
+Tools available: grep_search, file_search, list_directory, read_file, get_function_info, mark_as_discussed, write_to_rules
 
 Whenever you learn a stable, reusable fact about the user or codebase, call write_to_rules immediately with a single-sentence insight. Do this proactively without being asked. Do not repeat existing rules.`;
 
@@ -179,7 +205,7 @@ Whenever you learn a stable, reusable fact about the user or codebase, call writ
         setup: {
             model: `models/${GEMINI_MODEL}`,
             generationConfig: {
-                responseModalities: ["AUDIO"],
+                responseModalities: ["AUDIO"], // Function calling works with AUDIO modality
                 speechConfig: {
                     voiceConfig: {
                         prebuiltVoiceConfig: { voiceName: "Kore" }
@@ -489,7 +515,7 @@ function handleGeminiMessage(data) {
             // NOTE: Do NOT return — other fields may be present on this message
         }
 
-        // 2. Model audio output
+        // 2. Model audio output or function calls
         if (sc.modelTurn && sc.modelTurn.parts) {
             for (const part of sc.modelTurn.parts) {
                 if (part.inlineData && part.inlineData.data) {
@@ -501,6 +527,12 @@ function handleGeminiMessage(data) {
                     if (state.audioPlayer) {
                         state.audioPlayer.play(part.inlineData.data);
                     }
+                }
+                if (part.functionCall) {
+                    // Preemptively enter TOOL_PENDING as soon as we see a functionCall stub
+                    // This prevents audio streaming during the gap before the actual toolCall message arrives
+                    state.audioState = 'TOOL_PENDING';
+                    debugLog('🔧', 'TOOL_PRE', `Detected functionCall stub, entering TOOL_PENDING`);
                 }
             }
         }
@@ -551,7 +583,7 @@ function handleGeminiMessage(data) {
 
         if (sc.generationComplete) {
             debugLog('🏁', 'GEN', 'Generation complete');
-            state.audioState = 'IDLE'; // ← this line stops the mic before tool call arrives
+            // Do NOT change audioState here — toolCall may be incoming
         }
 
         // Log any unhandled serverContent keys
@@ -626,6 +658,10 @@ function onSessionReady() {
 
     state.audioState = 'IDLE';
     state.audioBuffer = [];
+    state.isUserSpeaking = false;
+    
+    // Clear dynamic graph nodes (keep base nodes intact)
+    clearDynamicGraphNodes();
 
     // Start persistent session logger
     state.sessionLogger = new SessionLogger();
@@ -679,39 +715,62 @@ async function startAudioCapture() {
         await audioContext.audioWorklet.addModule("/static/pcm-processor.js");
         const workletNode = new AudioWorkletNode(audioContext, "pcm-processor");
 
+        let myvad = null;
+        try {
+            // Provide visual feedback while VAD model downloads (~2MB)
+            addSystemMessage("Loading VAD model...");
+            myvad = await vad.MicVAD.new({
+                stream: stream,
+                positiveSpeechThreshold: 0.80,  // Slightly lower to catch speech easier
+                negativeSpeechThreshold: 0.40,  // Lower to keep speech active longer
+                minSpeechFrames: 3,             // Fewer frames to start
+                preSpeechPadFrames: 10,         // More padding before speech
+                redemptionFrames: 25,           // Much longer grace period (was 12)
+                onSpeechStart: () => {
+                    console.log("🗣️ VAD: Speech STARTED");
+                    state.isUserSpeaking = true;
+                },
+                onSpeechEnd: (audio) => {
+                    console.log("⏹️ VAD: Speech ENDED");
+                    state.isUserSpeaking = false;
+                },
+                onVADMisfire: () => {
+                    console.log("🚫 VAD: Misfire (false alarm)");
+                    state.isUserSpeaking = false;
+                }
+            });
+            myvad.start();
+            addSystemMessage("VAD ready — speak to begin");
+        } catch (e) {
+            console.error("VAD initialization failed:", e);
+            addSystemMessage("VAD failed to load — microphone may stay open.");
+            // Fallback (always true) if VAD fails
+            state.isUserSpeaking = true;
+        }
+
         workletNode.port.onmessage = (event) => {
             if (event.data.type !== "pcm" || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
 
-            const { data, energy } = event.data;
+            const { data } = event.data;
 
-            switch (state.audioState) {
-                case 'STREAMING':
-                    if (energy > ENERGY_THRESHOLD) {
-                        state.lastVoiceMs = performance.now();
-                        sendAudioChunk(data);
-                    } else {
-                        // Stream tail silence for 500ms to preserve natural speech endings
-                        if (performance.now() - (state.lastVoiceMs || 0) > 500) {
-                            state.audioState = 'IDLE';
-                        } else {
-                            sendAudioChunk(data);
-                        }
-                    }
-                    break;
+            if (state.audioState === 'TOOL_PENDING') {
+                return; // Rigid block during tool execution
+            }
 
-                case 'IDLE':
-                    // Silent gating: only resume when voice detected
-                    if (energy > ENERGY_THRESHOLD) {
-                        state.audioState = 'STREAMING';
-                        state.lastVoiceMs = performance.now();
-                        sendAudioChunk(data);
-                    }
-                    // Otherwise: discard silent chunk
-                    break;
+            // Debug: Log the state to understand why audio isn't flowing
+            if (state.audioChunksSent === 0 || state.audioChunksSent % 100 === 1) {
+                console.log(`🎤 Worklet state: isUserSpeaking=${state.isUserSpeaking}, audioState=${state.audioState}`);
+            }
 
-                case 'TOOL_PENDING':
-                    // Ignore mic input during tool calls — no interruption until tool completes
-                    break;
+            if (state.isUserSpeaking) {
+                if (state.audioState !== 'STREAMING') {
+                    state.audioState = 'STREAMING';
+                }
+                sendAudioChunk(data);
+            } else {
+                if (state.audioState === 'STREAMING') {
+                    state.audioState = 'IDLE';
+                }
             }
         };
 
@@ -723,7 +782,9 @@ async function startAudioCapture() {
             audioContext,
             source,
             workletNode,
+            myvad,
             stop() {
+                if (this.myvad) this.myvad.pause();
                 workletNode.disconnect();
                 source.disconnect();
                 stream.getTracks().forEach(t => t.stop());
@@ -982,18 +1043,49 @@ async function handleToolCall(toolCall) {
                     }
                 }
 
-                // Extract filename from tool args/results for graph visualization
-                const toolFilename = fc.args?.path || fc.args?.filename || fc.args?.file || fc.args?.name || null;
+                const toolFilename = fc.args?.path || fc.args?.file_path || fc.args?.filename || fc.args?.file || fc.args?.name || null;
                 if (toolFilename && typeof graphState !== 'undefined') {
                     const shortName = toolFilename.split('/').pop().split('\\').pop();
-                    const prevActive = Object.keys(graphState.nodes).find(k => graphState.nodes[k].state === 'active');
-                    const rx = 30 + Math.random() * 190;
-                    const ry = 20 + Math.random() * 280;
-                    addGraphNode(shortName, "visited", rx, ry);
-                    if (prevActive && prevActive !== shortName) {
-                        addGraphEdge(prevActive, shortName);
+                    
+                    let nodeFile = toolFilename;
+                    
+                    const existingNodeKey = Object.keys(graphState.nodes).find(k => k.endsWith(shortName));
+                    if(existingNodeKey){
+                        nodeFile = existingNodeKey;
+                    } else {
+                        nodeFile = shortName;
                     }
-                    setActiveNode(shortName);
+
+                    const prevActive = Object.keys(graphState.nodes).find(k => graphState.nodes[k].state === 'active');
+                    
+                    if(existingNodeKey) {
+                        setActiveNode(nodeFile);
+                        const node = graphState.nodes[nodeFile];
+                        if (node) {
+                            node.touchCount = (node.touchCount || 0) + 1;
+                            node.el.setAttribute('data-touches', Math.min(node.touchCount, 10));
+                        }
+                    } else {
+                        addGraphNode(nodeFile, "visited dynamic", nodeFile, 1.0, false, 0);
+                        setActiveNode(nodeFile);
+                        const node = graphState.nodes[nodeFile];
+                        if (node) {
+                            node.touchCount = 1;
+                            node.el.setAttribute('data-touches', '1');
+                        }
+                    }
+
+                    if (state.currentAssistantMsg) {
+                        state.currentAssistantMsg.setAttribute('data-file', nodeFile);
+                    }
+
+                    if (prevActive && prevActive !== nodeFile) {
+                        addGraphEdge(prevActive, nodeFile, true, true);
+                    }
+                    
+                    if (typeof updateGraphSimulation === "function") {
+                        updateGraphSimulation();
+                    }
                 }
 
                 return {
@@ -1058,9 +1150,43 @@ function addMessage(text, type) {
     const div = document.createElement("div");
     div.className = `message ${type}`;
     div.textContent = text;
-    container.appendChild(div);
+    
+    div.addEventListener('click', (e) => {
+        const file = div.getAttribute('data-file');
+        if (file && e.target === div && e.offsetX < 20) {
+            highlightGraphNode(file);
+        }
+    });
+    
+    container.prepend(div);
     scrollTranscript();
     return div;
+}
+
+function highlightGraphNode(filename) {
+    const node = graphState.nodes[filename];
+    if (node && node.el) {
+        node.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+        node.el.style.animation = 'none';
+        setTimeout(() => {
+            node.el.style.animation = 'nodeAppear 0.6s ease-out';
+        }, 10);
+        
+        if (graphTooltip) {
+            const rect = node.el.getBoundingClientRect();
+            const touches = node.touchCount || 0;
+            const touchText = touches > 0 ? ` • ${touches} discussion${touches !== 1 ? 's' : ''}` : '';
+            graphTooltip.innerHTML = `${node.name} <span class="pagerank-score">PageRank: ${(node.score || 0).toFixed(3)}${touchText}</span>`;
+            graphTooltip.style.left = `${rect.left + 24}px`;
+            graphTooltip.style.top = `${rect.top - 12}px`;
+            graphTooltip.classList.add("visible");
+            
+            setTimeout(() => {
+                if (graphTooltip) graphTooltip.classList.remove("visible");
+            }, 3000);
+        }
+    }
 }
 
 function addSystemMessage(text) {
@@ -1078,7 +1204,7 @@ function addToolMessage(text) {
 
 function scrollTranscript() {
     const container = document.getElementById("messages-area");
-    container.scrollTop = container.scrollHeight;
+    container.scrollTop = 0;
 }
 
 function updateStatus(status, text) {
@@ -1150,28 +1276,210 @@ function base64ToInt16Array(base64) {
 // ════════════════════════════════════════════════════════════════
 
 const graphState = {
-    nodes: {},  // filename -> { el, x, y, state }
+    nodes: {},  // filename -> D3 node data
+    links: [],  // array of D3 link data
     nodeCount: 0,
+    simulation: null
 };
 
-function addGraphNode(filename, nodeState, x, y) {
-    if (graphState.nodes[filename]) return;
+let graphTooltip = null;
+
+function initGraphTooltip() {
+    if (!graphTooltip) {
+        graphTooltip = document.createElement("div");
+        graphTooltip.className = "graph-tooltip";
+        document.body.appendChild(graphTooltip);
+    }
+}
+
+function clearDynamicGraphNodes() {
+    const svg = document.getElementById("graph-svg");
+    
+    // remove dynamic nodes from DOM and state
+    for(const k of Object.keys(graphState.nodes)) {
+        if(!graphState.nodes[k].isBase) {
+            graphState.nodes[k].el.remove();
+            delete graphState.nodes[k];
+            graphState.nodeCount--;
+        } else {
+            // reset base nodes
+            graphState.nodes[k].el.className = "graph-node base";
+            graphState.nodes[k].state = "base";
+        }
+    }
+    
+    // remove dynamic edges
+    graphState.links = graphState.links.filter(l => l.isBase);
+
+    if(svg) {
+        const dynamicEdges = svg.querySelectorAll('.graph-edge.dynamic, .graph-edge.traversing');
+        dynamicEdges.forEach(e => e.remove());
+    }
+
+    if (graphState.simulation) updateGraphSimulation();
+    
+    // Update badge
+    const badge = document.getElementById("node-count-badge");
+    if(badge) {
+        badge.textContent = `${graphState.nodeCount} node${graphState.nodeCount !== 1 ? 's' : ''}`;
+    }
+}
+
+function renderBaseGraph(graphData) {
+    initGraphTooltip();
+
+    const container = document.getElementById("graph-nodes");
+    if (!container) return;
+    
+    container.innerHTML = ""; // clear all nodes
+    const svg = document.getElementById("graph-svg");
+    if (svg) {
+        // clear all edges except defs
+        const defs = svg.querySelector('defs');
+        svg.innerHTML = '';
+        if(defs) svg.appendChild(defs);
+    }
+
+    graphState.nodes = {};
+    graphState.links = [];
+    graphState.nodeCount = 0;
+
+    const nodes = graphData.nodes || [];
+    const edges = graphData.edges || [];
+
+    nodes.forEach((node) => {
+        const shortName = node.id.split('/').pop().split('\\').pop();
+        
+        const scale = 0.7 + (node.score * 2.5);
+        
+        addGraphNode(node.id, "base", shortName, scale, true, node.score);
+    });
+
+    edges.forEach(edge => {
+        addGraphEdge(edge.source, edge.target, false);
+    });
+
+    setupD3Simulation();
+}
+
+function setupD3Simulation() {
+    const container = document.getElementById("graph-canvas");
+    const width = container.clientWidth || 800;
+    const height = container.clientHeight || 600;
+
+    if (graphState.simulation) {
+        graphState.simulation.stop();
+    }
+
+    graphState.simulation = d3.forceSimulation()
+        .force("link", d3.forceLink().id(d => d.id).distance(80))
+        .force("charge", d3.forceManyBody().strength(-200))
+        .force("x", d3.forceX(width / 2).strength(d => 0.05 + (d.score * 0.3)))
+        .force("y", d3.forceY(height / 2).strength(d => 0.05 + (d.score * 0.3)))
+        .force("collide", d3.forceCollide().radius(d => (18 * d.scale) + 4).iterations(2))
+        .on("tick", onSimulationTick);
+
+    updateGraphSimulation();
+}
+
+function updateGraphSimulation() {
+    if (!graphState.simulation) return;
+    const nodesArr = Object.values(graphState.nodes);
+    graphState.simulation.nodes(nodesArr);
+    graphState.simulation.force("link").links(graphState.links);
+    graphState.simulation.alpha(1).restart();
+}
+
+function onSimulationTick() {
+    const container = document.getElementById("graph-canvas");
+    const width = container ? container.clientWidth : 280;
+    const height = container ? container.clientHeight : 400;
+    const padding = 20;
+
+    // Update nodes with bounding box constraints
+    Object.values(graphState.nodes).forEach(d => {
+        d.x = Math.max(padding, Math.min(width - padding, d.x));
+        d.y = Math.max(padding, Math.min(height - padding, d.y));
+        d.el.style.left = `${d.x}px`;
+        d.el.style.top = `${d.y}px`;
+    });
+
+    // Update SVG links
+    graphState.links.forEach(l => {
+        if(l.lineEl && l.source.x !== undefined && l.target.x !== undefined) {
+            l.lineEl.setAttribute("x1", l.source.x);
+            l.lineEl.setAttribute("y1", l.source.y);
+            l.lineEl.setAttribute("x2", l.target.x);
+            l.lineEl.setAttribute("y2", l.target.y);
+        }
+    });
+}
+
+function addGraphNode(filename, nodeState, displayName = null, scale = 1.0, isBase = false, score = 0) {
+    if (graphState.nodes[filename]) return graphState.nodes[filename];
 
     const container = document.getElementById("graph-nodes");
     const el = document.createElement("div");
     el.className = `graph-node ${nodeState}`;
     el.dataset.filename = filename;
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
+    
+    el.style.transform = `translate(-50%, -50%) scale(${scale})`;
     el.style.animation = 'nodeAppear 0.6s ease-out both';
-    el.innerHTML = `<span class="node-dot"></span><span class="node-label">${filename}</span>`;
+    
+    if (score > 0.08) {
+        el.style.filter = `drop-shadow(0 0 ${score * 30}px rgba(77, 209, 196, 0.4))`;
+    }
+
+    const display = displayName || filename.split('/').pop().split('\\').pop();
+    el.innerHTML = `<span class="node-dot"></span><span class="node-label" style="transform: scale(${1/scale})">${display}</span>`;
+    
+    el.addEventListener('mouseenter', () => {
+        if (!graphTooltip) return;
+        const rect = el.getBoundingClientRect();
+        const touches = nodeData.touchCount || 0;
+        const touchText = touches > 0 ? ` • ${touches} discussion${touches !== 1 ? 's' : ''}` : '';
+        graphTooltip.innerHTML = `${display} <span class="pagerank-score">PageRank: ${(score || 0).toFixed(3)}${touchText}</span>`;
+        graphTooltip.style.left = `${rect.left + 24}px`;
+        graphTooltip.style.top = `${rect.top - 12}px`;
+        graphTooltip.classList.add("visible");
+        
+        const messagesWithFile = document.querySelectorAll(`[data-file="${filename}"]`);
+        messagesWithFile.forEach(msg => msg.classList.add('highlight'));
+    });
+    
+    el.addEventListener('mouseleave', () => {
+        if (graphTooltip) graphTooltip.classList.remove("visible");
+        
+        const messagesWithFile = document.querySelectorAll(`[data-file="${filename}"]`);
+        messagesWithFile.forEach(msg => msg.classList.remove('highlight'));
+    });
+    
+    el.addEventListener('click', () => {
+        showNodeDetailPanel(filename, display, score, nodeData.touchCount || 0);
+    });
+    
     container.appendChild(el);
 
-    graphState.nodes[filename] = { el, x, y, state: nodeState };
+    const nodeData = {
+        id: filename,
+        name: display,
+        el,
+        state: nodeState,
+        isBase,
+        scale,
+        score,
+        touchCount: 0,
+        x: 140 + (Math.random() - 0.5) * 100,
+        y: 200 + (Math.random() - 0.5) * 100
+    };
+
+    graphState.nodes[filename] = nodeData;
     graphState.nodeCount++;
 
     const badge = document.getElementById("node-count-badge");
-    badge.textContent = `${graphState.nodeCount} node${graphState.nodeCount !== 1 ? 's' : ''}`;
+    if(badge) badge.textContent = `${graphState.nodeCount} node${graphState.nodeCount !== 1 ? 's' : ''}`;
+
+    return nodeData;
 }
 
 function setActiveNode(filename) {
@@ -1185,7 +1493,7 @@ function setActiveNode(filename) {
 
     const entry = graphState.nodes[filename];
     if (entry) {
-        entry.el.className = "graph-node active";
+        entry.el.className = `graph-node active ${entry.isBase ? 'base' : 'dynamic'}`;
         entry.state = "active";
     }
 
@@ -1200,21 +1508,86 @@ function setActiveNode(filename) {
     bar.innerHTML = segments.join('');
 }
 
-function addGraphEdge(fromFile, toFile) {
+function addGraphEdge(fromFile, toFile, isDynamic = false, isTraversal = false) {
     const from = graphState.nodes[fromFile];
     const to = graphState.nodes[toFile];
     if (!from || !to) return;
 
+    const existing = graphState.links.find(l => 
+        (l.source === from || l.source.id === fromFile) && 
+        (l.target === to || l.target.id === toFile)
+    );
+
+    if (existing) {
+        if (isTraversal && existing.lineEl) {
+            existing.lineEl.classList.remove('base', 'dynamic');
+            void existing.lineEl.offsetWidth; 
+            existing.lineEl.classList.add('traversing');
+            
+            animateTraversalParticle(from, to, existing.lineEl);
+        }
+        return;
+    }
+
     const svg = document.getElementById("graph-svg");
+    if(!svg) return;
     const ns = "http://www.w3.org/2000/svg";
     const line = document.createElementNS(ns, "line");
-    line.setAttribute("x1", from.x + 5);
-    line.setAttribute("y1", from.y + 5);
-    line.setAttribute("x2", to.x + 5);
-    line.setAttribute("y2", to.y + 5);
-    line.setAttribute("class", "graph-edge");
-    line.setAttribute("marker-end", "url(#arrow)");
+    line.setAttribute("class", `graph-edge ${isTraversal ? 'traversing' : (isDynamic ? 'dynamic' : 'base')}`);
+    if (isDynamic || isTraversal) {
+        line.setAttribute("marker-end", "url(#arrow)");
+    }
     svg.appendChild(line);
+
+    const linkData = {
+        source: fromFile,
+        target: toFile,
+        lineEl: line,
+        isBase: !isDynamic && !isTraversal
+    };
+
+    graphState.links.push(linkData);
+    
+    if (isTraversal) {
+        setTimeout(() => animateTraversalParticle(from, to, line), 100);
+    }
+}
+
+function animateTraversalParticle(from, to, lineEl) {
+    if (!from || !to || !from.x || !to.x) return;
+    
+    const svg = document.getElementById("graph-svg");
+    if (!svg) return;
+    
+    const ns = "http://www.w3.org/2000/svg";
+    const particle = document.createElementNS(ns, "circle");
+    particle.setAttribute("class", "traversal-particle");
+    particle.setAttribute("r", "4");
+    particle.setAttribute("cx", from.x);
+    particle.setAttribute("cy", from.y);
+    svg.appendChild(particle);
+    
+    const duration = 800;
+    const startTime = performance.now();
+    
+    function animate(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        const x = from.x + (to.x - from.x) * progress;
+        const y = from.y + (to.y - from.y) * progress;
+        
+        particle.setAttribute("cx", x);
+        particle.setAttribute("cy", y);
+        
+        if (progress < 1) {
+            requestAnimationFrame(animate);
+        } else {
+            particle.remove();
+        }
+    }
+    
+    requestAnimationFrame(animate);
 }
 
 function addRule(text) {
@@ -1224,7 +1597,37 @@ function addRule(text) {
     item.innerHTML = `<span class="rule-dot"></span><span class="rule-text">${text}</span>`;
     list.prepend(item);
     setTimeout(() => item.classList.remove("flash"), 2000);
+    
+    updateInsightsCount();
 }
+
+function updateInsightsCount() {
+    const list = document.getElementById("rules-list");
+    const count = list ? list.children.length : 0;
+    const countEl = document.getElementById("insights-count");
+    if (countEl) {
+        countEl.textContent = `${count} insight${count !== 1 ? 's' : ''}`;
+    }
+}
+
+function initializeInsightsOverlay() {
+    const toggle = document.getElementById("insights-toggle");
+    const overlay = document.getElementById("insights-overlay");
+    const panel = document.getElementById("insights-panel");
+    
+    if (toggle && overlay && panel) {
+        toggle.addEventListener('click', () => {
+            overlay.classList.toggle('insights-collapsed');
+            panel.classList.toggle('hidden');
+        });
+    }
+    
+    updateInsightsCount();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initializeInsightsOverlay();
+});
 
 function setSessionState(sessionState) {
     const dot = document.getElementById("status-dot");
@@ -1253,6 +1656,77 @@ function setSessionState(sessionState) {
             orb.classList.add("analyzing");
             waveform.classList.remove("active");
             break;
+    }
+}
+
+function showNodeDetailPanel(filename, displayName, score, touchCount) {
+    const panel = document.getElementById("code-panel");
+    const fileNameEl = document.getElementById("code-filename");
+    const bodyEl = document.getElementById("code-body");
+    
+    panel.classList.remove("hidden");
+    fileNameEl.textContent = displayName;
+    
+    const importance = score > 0.15 ? "Core file" : score > 0.08 ? "Important file" : score > 0.03 ? "Supporting file" : "Leaf node";
+    const connections = Object.values(graphState.links).filter(l => 
+        (l.source === filename || l.source.id === filename || l.target === filename || l.target.id === filename)
+    ).length;
+    
+    bodyEl.innerHTML = `
+        <div style="padding: 20px; font-family: var(--font-mono); font-size: 12px; line-height: 1.8; color: var(--text-secondary);">
+            <div style="margin-bottom: 20px;">
+                <div style="color: var(--text-muted); font-size: 10px; text-transform: uppercase; margin-bottom: 8px;">File Path</div>
+                <div style="color: var(--text-primary);">${filename}</div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <div style="color: var(--text-muted); font-size: 10px; text-transform: uppercase; margin-bottom: 8px;">PageRank Score</div>
+                <div style="color: var(--teal); font-size: 16px; font-weight: 600;">${score.toFixed(4)}</div>
+                <div style="color: var(--text-secondary); font-size: 11px; margin-top: 4px;">${importance}</div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <div style="color: var(--text-muted); font-size: 10px; text-transform: uppercase; margin-bottom: 8px;">Graph Metrics</div>
+                <div>${connections} connection${connections !== 1 ? 's' : ''}</div>
+                <div>${touchCount} discussion${touchCount !== 1 ? 's' : ''} this session</div>
+            </div>
+            
+            <button onclick="scrollToFileInConversation('${filename}')" style="
+                background: var(--teal-15);
+                color: var(--teal);
+                border: 1px solid var(--teal-25);
+                padding: 8px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-family: var(--font-mono);
+                font-size: 11px;
+                margin-top: 12px;
+            ">Show in conversation →</button>
+            
+            <button onclick="document.getElementById('code-panel').classList.add('hidden')" style="
+                background: transparent;
+                color: var(--text-muted);
+                border: 1px solid var(--border);
+                padding: 8px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-family: var(--font-mono);
+                font-size: 11px;
+                margin-top: 8px;
+                margin-left: 8px;
+            ">Close</button>
+        </div>
+    `;
+}
+
+function scrollToFileInConversation(filename) {
+    const messages = document.querySelectorAll(`[data-file="${filename}"]`);
+    if (messages.length > 0) {
+        messages[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        messages.forEach(msg => {
+            msg.classList.add('highlight');
+            setTimeout(() => msg.classList.remove('highlight'), 2000);
+        });
     }
 }
 

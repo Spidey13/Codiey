@@ -33,8 +33,8 @@ def get_repo_map():
     if _repo_map is None:
         from codiey.codebase.repo_map import RepoMap
         _repo_map = RepoMap(_workspace_path)
-        if not _repo_map.load_cache():
-            _repo_map.build()
+        _repo_map.load_cache()
+        _repo_map.build()
     return _repo_map
 
 
@@ -213,6 +213,44 @@ async def get_workspace_summary():
         "project_name": workspace.name,
     }
 
+@app.get("/api/workspace/graph")
+async def get_workspace_graph():
+    """Return the top files and their reference edges for UI visualization."""
+    repo_map = get_repo_map()
+
+    # Get top 15 files
+    top_files = repo_map.ranked_files[:15]
+    if not top_files:
+        return {"nodes": [], "edges": []}
+
+    # Normalize scores for the frontend
+    max_score = top_files[0][1] if top_files else 1.0
+    if max_score == 0:
+        max_score = 1.0
+
+    nodes = []
+    top_paths = set()
+    for f_path, score in top_files:
+        nodes.append({
+            "id": f_path,
+            "score": score / max_score
+        })
+        top_paths.add(f_path)
+
+    edges = []
+    # Filter edges where BOTH source and target are in the top-N set
+    for u, v, data in repo_map.graph.edges(data=True):
+        if u in top_paths and v in top_paths:
+            edges.append({
+                "source": u,
+                "target": v,
+                "weight": data.get("weight", 1.0)
+            })
+
+    return {
+        "nodes": nodes,
+        "edges": edges
+    }
 
 @app.get("/api/mental-model")
 async def get_mental_model():

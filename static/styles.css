@@ -119,10 +119,16 @@ body {
     padding: 4px 12px;
     cursor: pointer;
     transition: background 0.15s;
+    touch-action: manipulation;
 }
 
 .btn-end-session:hover {
     background: rgba(248, 81, 73, 0.2);
+}
+
+.btn-end-session:focus-visible {
+    outline: 2px solid var(--code-red);
+    outline-offset: 2px;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -136,51 +142,41 @@ body {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   ZONE 2 — LEFT SIDEBAR
+   ZONE 2 — GRAPH PANEL (LEFT, 55-60%)
    ══════════════════════════════════════════════════════════════ */
 
-#left-sidebar {
-    width: 280px;
-    background: var(--bg-panel);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-}
-
-#graph-section {
+#graph-panel {
     flex: 6;
     display: flex;
     flex-direction: column;
-    min-height: 0;
+    min-width: 0;
+    position: relative;
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
 }
 
-#rules-section {
-    flex: 4;
+#graph-section {
+    flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 12px 16px;
     min-height: 0;
 }
 
-.sidebar-header {
+.graph-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
+    padding: 12px 20px;
     flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
 }
 
-#rules-section .sidebar-header {
-    padding: 0 0 12px 0;
-}
-
-.sidebar-label {
-    font-size: 10px;
+.graph-label {
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.15em;
-    color: var(--text-muted);
-    font-weight: 500;
+    color: var(--text-secondary);
+    font-weight: 600;
 }
 
 .node-badge {
@@ -188,14 +184,8 @@ body {
     color: var(--teal);
     font-size: 9px;
     font-family: var(--font-mono);
-    padding: 2px 8px;
+    padding: 3px 10px;
     border-radius: 99px;
-}
-
-.sidebar-separator {
-    height: 1px;
-    background: var(--border);
-    flex-shrink: 0;
 }
 
 /* Graph Canvas */
@@ -222,64 +212,285 @@ body {
     position: absolute;
     display: flex;
     align-items: center;
-    gap: 8px;
-    cursor: default;
+    gap: 10px;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: transform 0.2s ease;
+}
+
+.graph-node:hover {
+    transform: scale(1.05);
+}
+
+.graph-node:focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 4px;
+    border-radius: 8px;
 }
 
 .graph-node .node-dot {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     flex-shrink: 0;
+    position: relative;
+    transition: all 0.3s ease;
 }
 
 .graph-node .node-label {
-    font-size: 12px;
+    font-size: 13px;
     font-family: var(--font-mono);
     white-space: nowrap;
+    transition: opacity 0.3s ease, color 0.3s ease;
 }
 
 .graph-node.visited .node-dot { background: var(--teal); }
-.graph-node.visited .node-label { color: white; }
+.graph-node.visited .node-label { color: white; opacity: 1; }
 
 .graph-node.unvisited .node-dot {
     background: transparent;
     border: 1px solid var(--text-muted);
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
 }
-.graph-node.unvisited .node-label { color: var(--text-muted); }
+.graph-node.unvisited .node-label { color: var(--text-muted); opacity: 1; }
 
-.graph-node.active .node-dot {
+/* Base static structure nodes - now always visible */
+.graph-node.base .node-dot {
+    background: var(--text-dim);
+    width: 10px;
+    height: 10px;
+    opacity: 0.6;
+    transition: all 0.3s ease;
+}
+.graph-node.base .node-label { 
+    color: var(--text-secondary);
+    opacity: 0.5;
+    transition: opacity 0.3s ease, color 0.3s ease;
+}
+
+/* Reveal labels on hover or when node is active */
+.graph-node:hover .node-label {
+    opacity: 1;
+    color: var(--text-primary);
+}
+.graph-node.base:hover .node-dot {
+    opacity: 1;
     width: 12px;
     height: 12px;
+}
+
+.graph-node.active .node-dot {
+    width: 16px;
+    height: 16px;
     background: var(--teal);
     animation: glowPulse 3s ease-in-out infinite;
     position: relative;
+    opacity: 1;
 }
 
 .graph-node.active .node-dot::after {
     content: '';
     position: absolute;
-    inset: 0;
+    inset: -4px;
     border-radius: 50%;
-    background: var(--teal-30);
+    border: 2px solid var(--teal-30);
     animation: nodeGlowRing 3s ease-in-out infinite;
 }
 
-.graph-node.active .node-label { color: var(--teal); }
+.graph-node.active .node-label { 
+    color: var(--teal); 
+    opacity: 1;
+    font-weight: 500;
+}
+
+/* Discussion heat rings */
+.graph-node .node-dot::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    border: 0px solid transparent;
+    transition: all 0.3s ease;
+}
+
+.graph-node[data-touches="1"] .node-dot::before,
+.graph-node[data-touches="2"] .node-dot::before {
+    border-width: 1px;
+    border-color: var(--teal-25);
+    inset: -4px;
+}
+
+.graph-node[data-touches="3"] .node-dot::before,
+.graph-node[data-touches="4"] .node-dot::before,
+.graph-node[data-touches="5"] .node-dot::before {
+    border-width: 2px;
+    border-color: var(--teal);
+    inset: -5px;
+    opacity: 0.6;
+}
+
+.graph-node[data-touches="6"] .node-dot::before,
+.graph-node[data-touches="7"] .node-dot::before,
+.graph-node[data-touches="8"] .node-dot::before,
+.graph-node[data-touches="9"] .node-dot::before,
+.graph-node[data-touches="10"] .node-dot::before {
+    border-width: 3px;
+    border-color: var(--teal);
+    inset: -6px;
+    box-shadow: 0 0 12px var(--teal-30);
+    animation: heatRingPulse 2s ease-in-out infinite;
+}
 
 /* Graph edge lines */
 .graph-edge {
-    stroke: var(--text-dim);
-    stroke-width: 1;
-    stroke-dasharray: 4 3;
-    animation: dash 15s linear infinite;
+    stroke: var(--teal-25);
+    stroke-width: 1.5;
+    transition: all 0.3s ease;
 }
 
-/* Rules List */
-#rules-list {
+.graph-edge.base {
+    stroke-opacity: 0.2;
+    stroke-dasharray: none;
+    animation: none;
+}
+
+.graph-edge.dynamic {
+    stroke: var(--teal);
+    stroke-opacity: 0.5;
+    stroke-dasharray: 6 4;
+    animation: dash 20s linear infinite;
+}
+
+/* Traversal animation with particle */
+.graph-edge.traversing {
+    animation: edgePulse 1.5s ease-out forwards;
+    stroke-dasharray: none;
+}
+
+.traversal-particle {
+    fill: var(--teal);
+    filter: drop-shadow(0 0 4px var(--teal));
+}
+
+/* Graph Tooltip for PageRank */
+.graph-tooltip {
+    position: absolute;
+    background: var(--bg-active);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    transform: translateY(5px);
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    white-space: nowrap;
+}
+
+.graph-tooltip.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.graph-tooltip .pagerank-score {
+    color: var(--teal);
+    font-weight: 600;
+    margin-left: 6px;
+}
+
+/* Traversal Pulse Animation */
+@keyframes edgePulse {
+    0% { stroke: var(--teal-25); stroke-width: 1.5; stroke-opacity: 0.2; }
+    20% { stroke: var(--teal); stroke-width: 3; stroke-opacity: 1; }
+    100% { stroke: var(--teal); stroke-width: 2; stroke-opacity: 0.5; }
+}
+
+.graph-edge.traversing {
+    animation: edgePulse 1.5s ease-out forwards;
+    stroke-dasharray: none;
+}
+
+/* Rules List - now as floating overlay */
+#insights-overlay {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    z-index: 10;
+    max-width: 400px;
+}
+
+.insights-toggle {
+    background: rgba(20, 20, 20, 0.95);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    touch-action: manipulation;
+    backdrop-filter: blur(8px);
+}
+
+.insights-toggle:hover {
+    background: rgba(20, 20, 20, 1);
+    border-color: var(--teal-25);
+}
+
+.insights-toggle:focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 2px;
+}
+
+.insights-count {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+}
+
+.insights-chevron {
+    font-size: 10px;
+    color: var(--text-muted);
+    transition: transform 0.3s ease;
+}
+
+#insights-overlay:not(.insights-collapsed) .insights-chevron {
+    transform: rotate(180deg);
+}
+
+.insights-panel {
+    background: rgba(20, 20, 20, 0.95);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-top: 8px;
+    overflow: hidden;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.insights-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.insights-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.insights-list {
+    max-height: 200px;
     overflow-y: auto;
+    padding: 12px;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -318,15 +529,16 @@ body {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   ZONE 3 — CENTER PANEL
+   ZONE 3 — CONVERSATION PANEL (RIGHT, 40-45%)
    ══════════════════════════════════════════════════════════════ */
 
-#center-panel {
-    flex: 1;
+#conversation-panel {
+    flex: 4;
     display: flex;
     flex-direction: column;
     min-width: 0;
     background: var(--bg-dark);
+    border-left: 1px solid var(--border);
 }
 
 /* Breadcrumb Bar */
@@ -348,25 +560,64 @@ body {
 .breadcrumb-sep { color: var(--text-dim); margin: 0 2px; }
 .breadcrumb-active { color: var(--teal); }
 
-/* Messages Area */
+/* Messages Area - now reverse chronological */
 #messages-area {
     flex: 1;
     overflow-y: auto;
     padding: 20px 24px;
+    display: flex;
+    flex-direction: column-reverse;
 }
 
 #messages-container {
-    max-width: 672px;
+    max-width: 640px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
     gap: 24px;
+    width: 100%;
 }
 
 /* Message Styles */
 .message {
     animation: fadeIn 0.2s ease;
     line-height: 1.7;
+}
+
+.message[data-file] {
+    position: relative;
+    padding-left: 20px;
+}
+
+.message[data-file]::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--teal);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.message[data-file]:hover::before {
+    transform: scale(1.3);
+    box-shadow: 0 0 8px var(--teal);
+}
+
+.message[data-file]::before:hover {
+    background: var(--teal);
+}
+
+.message.highlight {
+    background: var(--teal-10);
+    border-left: 2px solid var(--teal);
+    padding-left: 18px;
+    margin-left: -20px;
+    border-radius: 4px;
+    transition: all 0.3s ease;
 }
 
 .message.user {
@@ -456,6 +707,10 @@ body {
     width: 52px;
     height: 52px;
     flex-shrink: 0;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: default;
 }
 
 .orb-glow {
@@ -785,11 +1040,17 @@ body {
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s ease;
+    touch-action: manipulation;
 }
 
 .btn-start-session:hover {
     background: #5eddd0;
     box-shadow: 0 0 20px var(--teal-30);
+}
+
+.btn-start-session:focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 4px;
 }
 
 .welcome-hint {
@@ -871,7 +1132,12 @@ body {
 
 @keyframes nodeGlowRing {
     0%, 100% { transform: scale(1); opacity: 0.4; }
-    50% { transform: scale(1.6); opacity: 0; }
+    50% { transform: scale(1.8); opacity: 0; }
+}
+
+@keyframes heatRingPulse {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.1); }
 }
 
 @keyframes dash {
@@ -899,3 +1165,28 @@ body {
    ══════════════════════════════════════════════════════════════ */
 
 .hidden { display: none !important; }
+
+/* ══════════════════════════════════════════════════════════════
+   ACCESSIBILITY — PREFERS REDUCED MOTION
+   ══════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+    
+    .graph-node,
+    .graph-edge,
+    .orb-glow,
+    .orb-body {
+        animation: none !important;
+    }
+    
+    #waveform .bar {
+        animation: none !important;
+    }
+}
