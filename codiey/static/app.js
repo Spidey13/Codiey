@@ -546,7 +546,7 @@ function handleGeminiMessage(data) {
                 if (!state.currentUserMsg) {
                     state.currentUserMsg = addMessage("", "user");
                 }
-                state.currentUserMsg.textContent += text;
+                (state.currentUserMsg._bodyEl || state.currentUserMsg).textContent += text;
                 scrollTranscript();
             }
             if (finished) {
@@ -564,7 +564,7 @@ function handleGeminiMessage(data) {
                 if (!state.currentAssistantMsg) {
                     state.currentAssistantMsg = addMessage("", "assistant");
                 }
-                state.currentAssistantMsg.textContent += text;
+                (state.currentAssistantMsg._bodyEl || state.currentAssistantMsg).textContent += text;
                 scrollTranscript();
             }
             if (finished) {
@@ -1149,16 +1149,51 @@ function addMessage(text, type) {
     const container = document.getElementById("messages-container");
     const div = document.createElement("div");
     div.className = `message ${type}`;
-    div.textContent = text;
-    
+
+    if (type === "system") {
+        // Minimal system pill — no role row
+        const body = document.createElement("div");
+        body.className = "message-body";
+        body.textContent = text;
+        div._bodyEl = body;
+        div.appendChild(body);
+    } else {
+        // Role header row
+        const roleRow = document.createElement("div");
+        roleRow.className = "message-role";
+        roleRow.setAttribute("aria-hidden", "true");
+
+        const roleDot = document.createElement("span");
+        roleDot.className = "message-role-dot";
+
+        const roleLabel = document.createElement("span");
+        roleLabel.className = "message-role-label";
+        roleLabel.textContent = type === "user" ? "You" : "Codiey";
+
+        roleRow.appendChild(roleDot);
+        roleRow.appendChild(roleLabel);
+
+        // Streaming body
+        const body = document.createElement("div");
+        body.className = "message-body";
+        body.textContent = text;
+        div._bodyEl = body;
+
+        div.appendChild(roleRow);
+        div.appendChild(body);
+    }
+
     div.addEventListener('click', (e) => {
         const file = div.getAttribute('data-file');
-        if (file && e.target === div && e.offsetX < 20) {
-            highlightGraphNode(file);
+        if (file) {
+            const rect = div.getBoundingClientRect();
+            if (e.clientX - rect.left < 24) {
+                highlightGraphNode(file);
+            }
         }
     });
-    
-    container.prepend(div);
+
+    container.appendChild(div);
     scrollTranscript();
     return div;
 }
@@ -1194,17 +1229,17 @@ function addSystemMessage(text) {
 }
 
 function addToolMessage(text) {
-    const container = document.getElementById("tool-toast-container");
-    const toast = document.createElement("div");
-    toast.className = "tool-toast";
-    toast.innerHTML = `<div class="tool-toast-icon">⌕</div><span class="tool-toast-name">${text}</span>`;
-    container.appendChild(toast);
-    setTimeout(() => toast.remove(), 5000);
+    const container = document.getElementById("messages-container");
+    const div = document.createElement("div");
+    div.className = "message tool";
+    div.innerHTML = `<span class="tool-call-icon">⌕</span><span class="tool-call-name">${text}</span>`;
+    container.appendChild(div);
+    scrollTranscript();
 }
 
 function scrollTranscript() {
     const container = document.getElementById("messages-area");
-    container.scrollTop = 0;
+    container.scrollTop = container.scrollHeight;
 }
 
 function updateStatus(status, text) {
@@ -1283,6 +1318,7 @@ const graphState = {
 };
 
 let graphTooltip = null;
+let graphZoom = null;
 
 function initGraphTooltip() {
     if (!graphTooltip) {
@@ -1372,12 +1408,31 @@ function setupD3Simulation() {
     }
 
     graphState.simulation = d3.forceSimulation()
-        .force("link", d3.forceLink().id(d => d.id).distance(80))
-        .force("charge", d3.forceManyBody().strength(-200))
-        .force("x", d3.forceX(width / 2).strength(d => 0.05 + (d.score * 0.3)))
-        .force("y", d3.forceY(height / 2).strength(d => 0.05 + (d.score * 0.3)))
-        .force("collide", d3.forceCollide().radius(d => (18 * d.scale) + 4).iterations(2))
+        .force("link", d3.forceLink().id(d => d.id).distance(140))
+        .force("charge", d3.forceManyBody().strength(-500))
+        .force("x", d3.forceX(width / 2).strength(0.04))
+        .force("y", d3.forceY(height / 2).strength(0.04))
+        .force("collide", d3.forceCollide().radius(60))
         .on("tick", onSimulationTick);
+
+    // Init zoom/pan behavior
+    graphZoom = d3.zoom()
+        .scaleExtent([0.2, 4])
+        .filter((event) => {
+            // Allow wheel zoom and pointer-based pan
+            return !event.button || event.type === 'wheel';
+        })
+        .on("zoom", (event) => {
+            const inner = document.getElementById("graph-inner");
+            if (inner) {
+                const {x, y, k} = event.transform;
+                inner.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
+            }
+        });
+    
+    d3.select("#graph-canvas")
+        .call(graphZoom)
+        .on("dblclick.zoom", null); // disable double-click zoom
 
     updateGraphSimulation();
 }
@@ -1391,15 +1446,8 @@ function updateGraphSimulation() {
 }
 
 function onSimulationTick() {
-    const container = document.getElementById("graph-canvas");
-    const width = container ? container.clientWidth : 280;
-    const height = container ? container.clientHeight : 400;
-    const padding = 20;
-
-    // Update nodes with bounding box constraints
+    // Update node positions (no clamping - free pan/zoom)
     Object.values(graphState.nodes).forEach(d => {
-        d.x = Math.max(padding, Math.min(width - padding, d.x));
-        d.y = Math.max(padding, Math.min(height - padding, d.y));
         d.el.style.left = `${d.x}px`;
         d.el.style.top = `${d.y}px`;
     });
@@ -1422,16 +1470,14 @@ function addGraphNode(filename, nodeState, displayName = null, scale = 1.0, isBa
     const el = document.createElement("div");
     el.className = `graph-node ${nodeState}`;
     el.dataset.filename = filename;
-    
-    el.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    el.style.transform = `translate(-50%, -50%)`;
     el.style.animation = 'nodeAppear 0.6s ease-out both';
-    
-    if (score > 0.08) {
-        el.style.filter = `drop-shadow(0 0 ${score * 30}px rgba(77, 209, 196, 0.4))`;
-    }
 
     const display = displayName || filename.split('/').pop().split('\\').pop();
-    el.innerHTML = `<span class="node-dot"></span><span class="node-label" style="transform: scale(${1/scale})">${display}</span>`;
+    const ext = display.split('.').pop().toLowerCase();
+    
+    // Pill-style node: ext dot + label
+    el.innerHTML = `<span class="node-ext" data-ext="${ext}"></span><span class="node-label">${display}</span>`;
     
     el.addEventListener('mouseenter', () => {
         if (!graphTooltip) return;
@@ -1460,17 +1506,21 @@ function addGraphNode(filename, nodeState, displayName = null, scale = 1.0, isBa
     
     container.appendChild(el);
 
+    const container2 = document.getElementById("graph-canvas");
+    const width = container2 ? container2.clientWidth : 800;
+    const height = container2 ? container2.clientHeight : 600;
+
     const nodeData = {
         id: filename,
         name: display,
         el,
         state: nodeState,
         isBase,
-        scale,
+        scale: 1.0,
         score,
         touchCount: 0,
-        x: 140 + (Math.random() - 0.5) * 100,
-        y: 200 + (Math.random() - 0.5) * 100
+        x: width / 2 + (Math.random() - 0.5) * 200,
+        y: height / 2 + (Math.random() - 0.5) * 200
     };
 
     graphState.nodes[filename] = nodeData;
@@ -1495,9 +1545,21 @@ function setActiveNode(filename) {
     if (entry) {
         entry.el.className = `graph-node active ${entry.isBase ? 'base' : 'dynamic'}`;
         entry.state = "active";
+        
+        // Auto-pan camera to center active node
+        if (graphZoom && entry.x !== undefined && entry.y !== undefined) {
+            const canvas = document.getElementById("graph-canvas");
+            if (canvas) {
+                const cx = canvas.clientWidth / 2;
+                const cy = canvas.clientHeight / 2;
+                const t = d3.zoomIdentity.translate(cx - entry.x, cy - entry.y);
+                d3.select("#graph-canvas").transition().duration(450).call(graphZoom.transform, t);
+            }
+        }
     }
 
-    const bar = document.getElementById("breadcrumb-bar");
+    const bar = document.getElementById("breadcrumb-content");
+    if (!bar) return;
     const parts = filename.replace(/[()]/g, '').split(/[\/\\\.]/);
     const segments = parts.map((p, i) => {
         if (i === parts.length - 1) {
@@ -1634,8 +1696,10 @@ function setSessionState(sessionState) {
     const text = document.getElementById("status-text");
     const orb = document.getElementById("orb");
     const waveform = document.getElementById("waveform");
+    const stateLabel = document.getElementById("voice-state-label");
 
     orb.className = "orb-container";
+    if (stateLabel) stateLabel.className = "";
 
     switch (sessionState) {
         case "listening":
@@ -1643,18 +1707,21 @@ function setSessionState(sessionState) {
             text.textContent = "LISTENING";
             orb.classList.add("listening");
             waveform.classList.remove("active");
+            if (stateLabel) { stateLabel.textContent = "Listening\u2026"; stateLabel.classList.add("state-listening"); }
             break;
         case "speaking":
             dot.className = "status-dot status-connected";
             text.textContent = "CODIEY SPEAKING";
             orb.classList.add("speaking");
             waveform.classList.add("active");
+            if (stateLabel) { stateLabel.textContent = "Speaking"; stateLabel.classList.add("state-speaking"); }
             break;
         case "analyzing":
             dot.className = "status-dot status-connected";
             text.textContent = "ANALYZING";
             orb.classList.add("analyzing");
             waveform.classList.remove("active");
+            if (stateLabel) { stateLabel.textContent = "Analyzing\u2026"; stateLabel.classList.add("state-analyzing"); }
             break;
     }
 }

@@ -8,8 +8,8 @@
     <meta name="description" content="Voice-first codebase thinking partner. Talk to your code, interrupt to redirect.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css?v=3">
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.18/dist/bundle.min.js"></script>
@@ -44,14 +44,16 @@
                 <span id="node-count-badge" class="node-badge">0 nodes</span>
             </div>
             <div id="graph-canvas">
-                <svg id="graph-svg" xmlns="http://www.w3.org/2000/svg">
-                    <defs>
-                        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-                            <polygon points="0 0, 8 3, 0 6" fill="#4dd1c4"/>
-                        </marker>
-                    </defs>
-                </svg>
-                <div id="graph-nodes"></div>
+                <div id="graph-inner">
+                    <svg id="graph-svg" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                                <polygon points="0 0, 8 3, 0 6" fill="#4dd1c4"/>
+                            </marker>
+                        </defs>
+                    </svg>
+                    <div id="graph-nodes"></div>
+                </div>
             </div>
         </div>
 
@@ -72,18 +74,19 @@
 
     <!-- ═══ ZONE 3 — CONVERSATION PANEL (RIGHT, 40-45%) ═══ -->
     <section id="conversation-panel">
-        <!-- Breadcrumb Bar -->
+        <!-- Panel Header / Breadcrumb Bar -->
         <nav id="breadcrumb-bar" aria-label="Current file context">
-            <span class="breadcrumb-segment breadcrumb-muted">—</span>
+            <div class="panel-header-left">
+                <span class="panel-title">Transcript</span>
+                <span class="model-badge">Gemini 2.5 Flash</span>
+            </div>
+            <span id="breadcrumb-content" class="breadcrumb-segment breadcrumb-muted">—</span>
         </nav>
 
         <!-- Messages Area -->
         <div id="messages-area" role="log" aria-live="polite" aria-label="Conversation transcript">
             <div id="messages-container"></div>
         </div>
-
-        <!-- Tool Call Toast Container -->
-        <div id="tool-toast-container" role="status" aria-live="polite"></div>
 
         <!-- Voice Input Area -->
         <div id="voice-input">
@@ -128,6 +131,9 @@
                 <span class="bar" style="--h:22px"></span>
                 <span class="bar" style="--h:8px"></span>
             </div>
+
+            <!-- Voice State Label -->
+            <div id="voice-state-label" aria-hidden="true">—</div>
 
             <!-- CTX Meter -->
             <div id="ctx-meter" aria-label="Context usage">
@@ -219,6 +225,6 @@
 })();
 </script>
 
-<script src="/static/app.js?v=2"></script>
+<script src="/static/app.js?v=3"></script>
 </body>
 </html>

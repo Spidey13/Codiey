@@ -1,44 +1,22 @@
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
-.Python
 *.egg-info/
 dist/
 build/
-
-# Virtual environments
 .venv/
 venv/
-ENV/
-env/
 
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Local environment / secrets
+# Environment
 .env
-.env.*
 
-# App/runtime artifacts
+# Codiey workspace data
 .codiey/
-traces.json
-*.log
-*.sqlite
-*.sqlite3
-*.db
 
-# OS/editor noise
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-*.tmp
+# IDE
 .vscode/
 .idea/
+
+# OS
+.DS_Store
+Thumbs.db
