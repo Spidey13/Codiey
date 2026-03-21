@@ -28,6 +28,7 @@ Those pieces are wired together in [`codiey/app.py`](codiey/app.py), [`codiey/st
 | Client | HTML/CSS + D3 for the graph; **ONNX + vad-web** for client-side VAD |
 | Graph math | NetworkX, NumPy, SciPy (PageRank) |
 | Parsing | tree-sitter + language bindings |
+| Tooling | **[uv](https://github.com/astral-sh/uv)** recommended for install + `uv run` (no manual venv dance) |
 
 ---
 
@@ -35,26 +36,25 @@ Those pieces are wired together in [`codiey/app.py`](codiey/app.py), [`codiey/st
 
 ### 1. Prerequisites
 
-- Python **3.10+**
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** (recommended) or another way to install the package editable (see “Without uv” below)
+- Python **3.10+** (uv will respect `requires-python` in `pyproject.toml`)
 - A **Gemini API key** ([Google AI Studio](https://aistudio.google.com/apikey))
 - **Headphones** recommended (echo cancellation helps, but full-duplex voice is picky)
 
-### 2. Install
+### 2. Clone & sync
 
 ```bash
 git clone <your-repo-url>
 cd <repo-directory>   # root that contains pyproject.toml
 
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# macOS/Linux:
-source .venv/bin/activate
-
-pip install -e .
+uv sync
 ```
 
+That creates a project environment and installs **Codiey** in editable mode so the `codiey` CLI is available. (You can also go straight to `uv run codiey start …`—uv will sync on first run if needed.)
+
 ### 3. Configure
+
+Put your key in `.env` at the repo root (the CLI loads it via `python-dotenv`):
 
 ```bash
 cp .env.example .env
@@ -63,20 +63,35 @@ cp .env.example .env
 
 ### 4. Run
 
-From the **project you want to talk about** (or pass `--workspace`):
+Point `--workspace` at the **codebase you want to talk about** (any directory on disk):
 
 ```bash
-cd /path/to/your/project
-codiey start
+uv run codiey start --workspace D:\Projects\Codiey
 ```
 
-Or explicitly:
+Examples:
 
 ```bash
-codiey start --workspace /path/to/project --port 7842
+# Same folder as the clone (index Codiey’s own source)
+uv run codiey start --workspace .
+
+# Another project
+uv run codiey start --workspace /path/to/other/repo --port 7842
 ```
 
 Defaults: **http://127.0.0.1:7842**, browser opens automatically (`--no-browser` to disable).
+
+### Without uv
+
+If you prefer a classic venv:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS / Linux
+pip install -e .
+codiey start --workspace /path/to/project
+```
 
 ---
 
