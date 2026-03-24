@@ -1,20 +1,70 @@
 # Codiey
 
-Voice-first assistant for a **local** codebase. You talk; it pulls context with tools (grep, read file, AST introspection), answers in **native audio** over Gemini Live, and keeps a **live dependency graph** in the UI so you can see what file the model is anchored on.
+> Voice-first codebase thinking partner — you talk, it reasons over your repo in real time.
 
-Built as a single installable Python package with a vanilla JS front end—no separate frontend build step.
+Codiey connects your microphone directly to **Gemini 2.5 Flash native audio** over a live WebSocket, gives the model a suite of code-intelligence tools (grep, read file, AST introspection, directory listing), and visualises which files it's reasoning about on an interactive **PageRank dependency graph** — all inside a single-page browser app served by a tiny FastAPI backend.
+
+Installed as a single Python package. No separate frontend build. Point it at any local repo and start talking.
 
 ---
 
-## Why it’s not “just a chatbot wrapper”
+## What makes it technically distinct
 
-- **End-to-end audio path** — Mic capture runs through the Web Audio **AudioWorklet** at 16 kHz PCM; playback is 24 kHz PCM from the model. That’s not `MediaRecorder` + REST; it’s the same constraints as a real-time voice product.
-- **Browser ↔ Gemini over WebSocket** — The app uses **BidiGenerateContent** (`v1alpha`) because **function calling doesn’t work on the constrained Live path**. The backend mints a **short-lived auth token** (`/api/token`) so the session isn’t proxying every audio frame through Python.
-- **Tool latency is designed in** — Tools split into **Tier 1** (model must see the result: `read_file`, `grep_search`, etc.) and **Tier 2** (side effects only: session memory, rules). Tier 2 returns immediately (`{"status":"queued"}`) and runs in a **thread pool** so the voice stream never blocks; the client sends the response back with **SILENT** scheduling so the model doesn’t narrate “I’m writing to disk.” Session end **drains** those futures before persisting state.
-- **Forced reasoning on every tool call** — Every declaration includes a required `reasoning` string. The backend ignores it; it exists to structure what the model emits before it touches your repo.
-- **Code intelligence is real** — Parsing is **Tree-sitter** (Python / JS / TS grammars). The repo map is a **directed graph** with **PageRank** (NetworkX + personalization) to rank files; the UI shows the top slice as nodes/edges, not a static file tree.
+### 1. End-to-end real-time audio (not REST + MediaRecorder)
 
-Those pieces are wired together in [`codiey/app.py`](codiey/app.py), [`codiey/static/app.js`](codiey/static/app.js), [`codiey/tools/declarations.py`](codiey/tools/declarations.py), and [`codiey/codebase/repo_map.py`](codiey/codebase/repo_map.py).
+- **Input:** AudioWorklet (`pcm-processor.js`) captures microphone at 16 kHz, converts Float32 → Int16 PCM, and posts raw buffers to the main thread at worklet cadence.
+- **Output:** 24 kHz PCM streamed back from the model is decoded and played via Web Audio API with no intermediate re-encoding.
+- **Protocol:** `BidiGenerateContent` (`v1alpha`) over a raw WebSocket — not the constrained Live path, because **function calling only works on the Bidi path**.
+
+### 2. Neural VAD voice gate (`@ricky0123/vad-web`)
+
+A client-side ONNX neural network (Silero VAD) runs in the browser and controls exactly when PCM bytes are forwarded to Gemini. This replaces an older energy-threshold approach that caused mid-utterance truncation.
+
+- `onSpeechStart` → `state.isUserSpeaking = true` → audio flows.
+- `onSpeechEnd` → `state.isUserSpeaking = false` → audio stops instantly.
+- Layered with a hard `TOOL_PENDING` gate — **no audio ever leaks during tool execution**, which was the root cause of `1008` WebSocket crashes. See [ADR 0002](docs/adr/0002-neural-vad-voice-gating.md) and [ADR 0003](docs/adr/0003-audio-state-machine-tool-gate.md).
+
+### 3. Two-tier tool architecture with `SILENT` scheduling
+
+Tools are split into two tiers so the voice stream never blocks on side-effects:
+
+| Tier | Tools | Return | Audio impact |
+|------|-------|--------|--------------|
+| **1 — Model must read result** | `read_file`, `grep_search`, `file_search`, `list_directory`, `get_function_info` | Full result | `TOOL_PENDING` gate active |
+| **2 — Side-effect only** | `write_to_rules`, `mark_as_discussed` | `{"status":"queued"}` immediately | No gate; runs in thread pool |
+
+Tier 2 responses are sent back to Gemini with **`scheduling: "SILENT"`** so the model doesn't narrate the write operation. The session-end route drains the thread pool before the backend exits.
+
+### 4. Session resilience and auto-reconnect
+
+- **Sliding window compression** (`contextWindowCompression`) — Gemini automatically prunes oldest turns when the context fills. The `systemInstruction` (rules file + directory tree) is always preserved.
+- **Resumption tokens** — every session is assigned a `sessionResumptionUpdate` handle stored in `localStorage`. On any unexpected WebSocket close (network drop, 1008, 1011), the client silently reconnects and presents the handle — conversation context is restored without user action.
+- **`goAway` handling** — the server signals ~60 seconds before a forced cycle. Codiey proactively reconnects in the background; the user sees nothing.
+- **Audio survives reconnects** — the `AudioContext` and mic stream are kept alive across reconnections (`endSession(keepAudio=true)`) per Gemini Live API guidance.
+
+See [ADR 0004](docs/adr/0004-session-resumption.md).
+
+### 5. Forced model reasoning on every tool call
+
+Every tool declaration includes a **required `reasoning` string** parameter. The backend ignores its value; it exists to force the model to emit a structured internal thought before touching your repository files, reducing hallucinated tool arguments.
+
+### 6. Real code intelligence (not file-path guessing)
+
+- **Tree-sitter** parses Python, JavaScript, and TypeScript into ASTs.
+- A **directed dependency graph** is built from import/require edges across the codebase.
+- Files are ranked with **PageRank** (NetworkX + personalization vector) — the model's tool calls can bias the walk toward recently-touched files.
+- The live UI shows the top-ranked slice as a **D3 force-directed graph**: high-PageRank nodes sit at the centre and glow; traversal pulses animate along edges as the model reads files.
+
+### 7. Persistent session memory (`write_to_rules`)
+
+As the model learns stable facts about your codebase or working style during a session, it calls `write_to_rules` with a single-sentence insight. These are appended to `.codiey/rules` and injected at the top of the system instruction on the next session — giving Codiey a growing per-project memory that survives model context resets.
+
+### 8. Live dual transcription
+
+Both sides of every conversation are transcribed in real time:
+
+- **Input transcription** (`inputAudioTranscription`) — what you said, streamed into the chat panel as you speak.
+- **Output transcription** (`outputAudioTranscription`) — what the model said, streamed word-by-word alongside the audio.
 
 ---
 
@@ -24,66 +74,61 @@ Those pieces are wired together in [`codiey/app.py`](codiey/app.py), [`codiey/st
 |------|--------|
 | Runtime | Python 3.10+ |
 | Server | FastAPI + Uvicorn |
-| Model | Gemini 2.5 Flash **native audio** (Live / Bidi) — see `GEMINI_MODEL` in `app.js` |
-| Client | HTML/CSS + D3 for the graph; **ONNX + vad-web** for client-side VAD |
+| Model | Gemini 2.5 Flash **native audio** (Live / Bidi) |
+| Client VAD | `@ricky0123/vad-web` + ONNX Runtime (in-browser) |
+| Client graph | D3.js force simulation |
 | Graph math | NetworkX, NumPy, SciPy (PageRank) |
-| Parsing | tree-sitter + language bindings |
-| Tooling | **[uv](https://github.com/astral-sh/uv)** recommended for install + `uv run` (no manual venv dance) |
+| Parsing | tree-sitter + Python / JS / TS grammars |
+| Package / env | **[uv](https://github.com/astral-sh/uv)** recommended |
 
 ---
 
-## Quick start (replicate on your machine)
+## Quick start
 
-### 1. Prerequisites
+### Prerequisites
 
-- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** (recommended) or another way to install the package editable (see “Without uv” below)
-- Python **3.10+** (uv will respect `requires-python` in `pyproject.toml`)
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** (recommended) or a classic venv + pip
+- Python **3.10+**
 - A **Gemini API key** ([Google AI Studio](https://aistudio.google.com/apikey))
-- **Headphones** recommended (echo cancellation helps, but full-duplex voice is picky)
+- **Headphones** recommended (echo cancellation is on, but speaker bleed is real)
 
-### 2. Clone & sync
+### Install
 
 ```bash
 git clone <your-repo-url>
-cd <repo-directory>   # root that contains pyproject.toml
-
+cd <repo-directory>
 uv sync
 ```
 
-That creates a project environment and installs **Codiey** in editable mode so the `codiey` CLI is available. (You can also go straight to `uv run codiey start …`—uv will sync on first run if needed.)
-
-### 3. Configure
-
-Put your key in `.env` at the repo root (the CLI loads it via `python-dotenv`):
+### Configure
 
 ```bash
 cp .env.example .env
 # Edit .env — set GEMINI_API_KEY=...
 ```
 
-### 4. Run
+### Run
 
-Point `--workspace` at the **codebase you want to talk about** (any directory on disk):
+Point `--workspace` at the codebase you want to reason about:
 
 ```bash
-uv run codiey start --workspace D:\Projects\Codiey
+uv run codiey start --workspace /path/to/your/project
 ```
 
-Examples:
+Defaults: **http://127.0.0.1:7842**, browser opens automatically.
 
 ```bash
-# Same folder as the clone (index Codiey’s own source)
+# Talk about Codiey's own source
 uv run codiey start --workspace .
 
-# Another project
-uv run codiey start --workspace /path/to/other/repo --port 7842
+# Different project, different port
+uv run codiey start --workspace /path/to/other/repo --port 8000
+
+# No auto-browser
+uv run codiey start --workspace . --no-browser
 ```
 
-Defaults: **http://127.0.0.1:7842**, browser opens automatically (`--no-browser` to disable).
-
 ### Without uv
-
-If you prefer a classic venv:
 
 ```bash
 python -m venv .venv
@@ -98,46 +143,57 @@ codiey start --workspace /path/to/project
 ## Project layout
 
 ```
-├── codiey/                 # Installable package
-│   ├── app.py              # FastAPI: UI, tokens, tools, session, graph API
-│   ├── cli.py              # `codiey start`
-│   ├── static/             # index.html, app.js, styles.css, worklet
-│   ├── tools/              # Tool schemas + handlers
-│   └── codebase/           # Parser, chunks, repo map, summaries
-├── docs/                   # Architecture notes, ADRs, plans, archives
-├── scripts/dev/            # Optional smoke scripts (run from repo root)
-├── pyproject.toml
-├── .env.example
-└── README.md
+codiey/
+├── app.py              # FastAPI: static UI, session API, tools, graph API
+├── cli.py              # `codiey start` CLI entry point
+├── static/             # index.html, app.js, styles.css, pcm-processor.js
+├── tools/              # Tool declarations (Gemini schemas) + handlers
+└── codebase/           # Tree-sitter parser, repo map, PageRank, summaries
+
+docs/
+├── architecture/       # System overview
+├── adr/                # Architecture Decision Records
+├── plans/              # Design plans and roadmaps
+└── archive/            # Historical debug notes
+
+.codiey/                # Runtime cache — gitignored
+                        # (session logs, mental model, repo map cache)
 ```
 
-Runtime artifacts (ignored by git) live under **`.codiey/`** inside the workspace: cache, mental model, session logs.
+---
+
+## How a session works
+
+1. **CLI** sets `CODIEY_WORKSPACE` env var and starts Uvicorn.
+2. **Browser** fetches tool declarations, codebase summary (rules + directory tree), and an ephemeral API key, then opens a WebSocket **directly** to Gemini's `BidiGenerateContent` endpoint.
+3. **Setup message** configures native audio, VAD sensitivity, both transcription channels, context compression, and a resumption handle — all in a single JSON frame.
+4. **Mic → Gemini:** VAD gate fires, AudioWorklet posts PCM → `sendAudioChunk` encodes to base64 and sends via WebSocket.
+5. **Gemini → Mic:** Model streams audio chunks back; `AudioPlayer` queues and plays them. Transcription tokens arrive on the same socket and update the chat panel.
+6. **Tool calls:** Model emits a `functionCall` stub → client enters `TOOL_PENDING` → POSTs to `/api/tools/execute` → sends `toolResponse` back → model continues.
+7. **Graph:** Tool activity dynamically adds nodes and pulses edges in the D3 graph to show which files the model is currently anchored on.
 
 ---
 
-## Architecture (short)
+## Security note
 
-1. **CLI** sets `CODIEY_WORKSPACE` and starts Uvicorn.
-2. **Startup** only records the workspace path—no full-repo parse at import.
-3. **Session start** resets in-memory mental model and can refresh repo map usage.
-4. **Client** loads tool declarations + a **lightweight text summary** of the project for the system prompt, fetches key/token, opens a **WebSocket** to Gemini, streams audio both ways, and POSTs tool calls to **`/api/tools/execute`**.
-5. **Graph** — `GET /api/workspace/graph` returns top-ranked files and edges for D3; tool activity can highlight nodes and edges as the conversation moves through files.
-
-More detail: [`docs/architecture/overview.md`](docs/architecture/overview.md).
-
----
-
-## Security note (intentional scope)
-
-The API key route and direct browser session are **meant for localhost**. Don’t expose this server to the internet without redesigning auth and key handling. For demos, run locally or use a trusted network with full understanding of the risk.
+The API key route and direct browser session are designed for **localhost use only**. Do not expose this server to the internet without redesigning auth and key handling.
 
 ---
 
 ## Docs & ADRs
 
-- **Index:** [`docs/README.md`](docs/README.md)  
-- **ADRs:** [`docs/adr/`](docs/adr/)  
-- **Plans / history:** [`docs/plans/`](docs/plans/), [`docs/archive/`](docs/archive/)
+| Resource | Path |
+|----------|------|
+| Docs index | [`docs/README.md`](docs/README.md) |
+| System architecture | [`docs/architecture/overview.md`](docs/architecture/overview.md) |
+| ADRs | [`docs/adr/`](docs/adr/) |
+| Design plans | [`docs/plans/`](docs/plans/) |
+| Debug archive | [`docs/archive/`](docs/archive/) |
+
+Key ADRs:
+- [0002 — Neural VAD voice gating](docs/adr/0002-neural-vad-voice-gating.md)
+- [0003 — Audio state machine / 1008 fix](docs/adr/0003-audio-state-machine-tool-gate.md)
+- [0004 — Session resumption & context compression](docs/adr/0004-session-resumption.md)
 
 ---
 
@@ -147,12 +203,10 @@ MIT — see [`pyproject.toml`](pyproject.toml).
 
 ---
 
-## Optional dev scripts
+## Dev scripts
 
-Smoke tests for parser / retrieval (must run from **repository root** so `codiey/` paths resolve):
+Smoke tests for parser and retrieval (run from repository root):
 
 ```bash
 python scripts/dev/test_parser_quick.py
 ```
-
-TypeScript parser experiments write under `scripts/dev/_scratch/` (gitignored).

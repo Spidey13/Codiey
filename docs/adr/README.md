@@ -15,8 +15,9 @@ Suggested sections:
 
 ## Index
 
-| ADR | Title |
-|-----|--------|
-| [0001](0001-record-architecture-decisions.md) | Record architecture decisions |
-
-(Add new rows as you add ADRs.)
+| ADR | Title | Status |
+|-----|--------|--------|
+| [0001](0001-record-architecture-decisions.md) | Record architecture decisions | Accepted |
+| [0002](0002-neural-vad-voice-gating.md) | Neural VAD for voice gating (`@ricky0123/vad-web`) | Accepted |
+| [0003](0003-audio-state-machine-tool-gate.md) | Audio state machine fix for 1008 tool-call crash | Accepted |
+| [0004](0004-session-resumption.md) | Session resumption and context window compression | Accepted |
