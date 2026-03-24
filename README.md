@@ -6,6 +6,10 @@ Codiey connects your microphone directly to **Gemini 2.5 Flash native audio** ov
 
 Installed as a single Python package. No separate frontend build. Point it at any local repo and start talking.
 
+<video src="assets/Codiey.mp4" controls="controls" style="max-width: 100%;">
+  Your browser does not support the video tag.
+</video>
+
 ---
 
 ## What makes it technically distinct
